@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Patent Drafting Tool</title>
+  <!-- Fonts: system fonts only, fully offline -->
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════
+     TOPBAR
+     ════════════════════════════════════════════════════════════ -->
+<div class="topbar">
+  <div class="topbar-logo">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/>
+    </svg>
+    <span>PATENT DRAFTING TOOL</span>
+    <span id="dataStatusBadge" class="tag tag-orange">● No Data</span>
+  </div>
+  <div class="topbar-nav">
+    <span id="projectNameDisplay" class="topbar-title" style="margin-right:8px"></span>
+    <button class="btn btn-sm btn-ghost" onclick="showPage('page-dashboard')">Back to Home</button>
+    <button class="btn btn-sm" onclick="openUploadModal()">📁 Upload Data</button>
+    <span class="topbar-title">PATENT DRAFTING TOOL</span>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: Dashboard
+     ════════════════════════════════════════════════════════════ -->
+<div id="page-dashboard" class="page active">
+  <div class="dashboard">
+    <!-- Sidebar -->
+    <div class="dashboard-sidebar">
+      <h2>Projects</h2>
+      <h3>Select a workspace</h3>
+      <button class="btn btn-sm" onclick="openUploadModal()" style="margin-bottom:4px">📁 Upload Excel Data</button>
+      <button class="btn btn-primary btn-sm" onclick="createNewProject()">+ New Project</button>
+      <div id="projectList" class="project-list"></div>
+    </div>
+    <!-- Main -->
+    <div class="dashboard-main">
+      <div class="dashboard-hero">
+        <h1>PATENT <span>DRAFTING</span> TOOL</h1>
+        <div class="dashboard-cards">
+          <div class="dashboard-card">
+            <h4>Claims</h4>
+            <p>Manage nested element trees with clarity and precision.</p>
+          </div>
+          <div class="dashboard-card">
+            <h4>Drafting</h4>
+            <p>Author definitions with AI-assist, and structured patent context.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: Main Editor (3-panel)
+     ════════════════════════════════════════════════════════════ -->
+<div id="page-editor" class="page">
+  <div class="editor-layout">
+    <!-- Left: Claims Panel -->
+    <div class="panel" style="background:var(--bg-secondary)">
+      <div class="panel-header">
+        <div class="panel-label">Claims & Elements</div>
+        <div class="panel-header-row">
+          <span class="panel-title">Claim Structures</span>
+          <button class="btn btn-sm btn-primary" onclick="addClaim()">+ Add Claim</button>
+        </div>
+        <div class="panel-subtitle">Manage your claim trees and element structures.</div>
+      </div>
+      <div class="panel-body" id="claimsContainer"></div>
+    </div>
+
+    <!-- Middle: Extraction Queue -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-label">Suggested Elements</div>
+        <div class="panel-header-row">
+          <span class="panel-title">LLM Extraction Queue</span>
+          <span class="tag tag-blue" id="queueCount">0 items</span>
+        </div>
+        <div class="panel-subtitle">Drag suggestions into your claim tree, or auto-process.</div>
+      </div>
+      <div class="panel-body" id="queueContainer"></div>
+    </div>
+
+    <!-- Right: Draft Editor -->
+    <div class="panel">
+      <div class="panel-header">
+        <div class="panel-label">Drafting Workspace</div>
+        <div class="panel-header-row">
+          <span class="panel-title">Claim Draft Editor</span>
+          <button class="btn btn-sm" onclick="openSettingsModal()">⚙ Settings</button>
+        </div>
+        <div class="panel-subtitle">Assemble drafts for claim text and definitions.</div>
+      </div>
+      <div class="draft-toolbar">
+        <button class="btn btn-sm" onclick="insertDraftReport()">📋 Assemble with Report</button>
+        <button class="btn btn-sm btn-primary" onclick="goToAiDraft()">⚡ Go to AI Draft</button>
+        <button class="btn btn-sm" onclick="openComposer()">📝 Draft Composer</button>
+      </div>
+      <div class="draft-content">
+        <textarea id="draftTextarea" class="draft-textarea"
+                  placeholder="Your patent draft text will appear here…"
+                  oninput="state.draftText = this.value"></textarea>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     PAGE: Draft Composer
+     ════════════════════════════════════════════════════════════ -->
+<div id="page-composer" class="page">
+  <div style="padding:12px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <div class="panel-label">AI Draft Workspace</div>
+      <div class="panel-title">Patent Draft Composer</div>
+      <div class="panel-subtitle" style="margin-top:2px">Assembly of full draft from claim inputs and referenced context.</div>
+    </div>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-sm" onclick="backToEditor()">← Back to Editor</button>
+    </div>
+  </div>
+  <div class="composer-layout">
+    <!-- Left: Claims Input -->
+    <div class="composer-panel">
+      <div class="composer-tabs">
+        <div class="composer-tab active">Structured Claims</div>
+        <div class="composer-tab">Claim Lists</div>
+      </div>
+      <div class="composer-content">
+        <label style="font-size:12px;color:var(--text-muted);display:block;margin-bottom:8px">CLAIMS INPUT</label>
+        <textarea id="composerClaimsInput" class="composer-textarea" rows="20"
+                  placeholder="Enter claim text with element references…"></textarea>
+      </div>
+      <div class="composer-footer">
+        <button class="btn btn-sm" onclick="backToEditor()">Review Claims</button>
+        <button class="btn btn-sm">Import from Editor ↑</button>
+      </div>
+    </div>
+    <!-- Right: Draft Output -->
+    <div class="composer-panel">
+      <div class="composer-tabs">
+        <div class="composer-tab active">Draft Output</div>
+        <div class="composer-tab">Sections</div>
+        <div class="composer-tab">Citations</div>
+      </div>
+      <div class="composer-content" id="composerDraftOutput">
+        <p style="color:var(--text-muted)">Click "Generate Draft" to create patent description…</p>
+      </div>
+      <div class="composer-footer">
+        <button id="btnGenerateDraft" class="btn btn-primary" onclick="generateDraft()">⚡ Generate Draft</button>
+        <button class="btn btn-sm">Export</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     MODAL: Element Definition
+     ════════════════════════════════════════════════════════════ -->
+<div id="defModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="panel-label">Drafting · Claim</div>
+        <h3>Element Definition</h3>
+        <p>Precision drafting units for element text specifications</p>
+      </div>
+      <button class="modal-close" onclick="closeDefModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="def-element-bar">
+        <span class="ref-num" id="defRefNum">-</span>
+        <div>
+          <div class="el-name" id="defElementName">Element</div>
+          <div class="el-sub">Main definition · Claim</div>
+        </div>
+      </div>
+      <div class="def-actions">
+        <button id="btnAiSuggest" class="btn btn-primary btn-sm" onclick="aiSuggestDefinition()">⚡ AI Suggested Definition</button>
+        <button class="btn btn-sm" onclick="copyDefinition()">📋 Copy</button>
+      </div>
+      <textarea id="defTextarea" rows="6"
+                placeholder="Enter the technical definition for this element…"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm btn-ghost" onclick="closeDefModal()">Cancel</button>
+      <button class="btn btn-sm btn-primary" onclick="saveDefinition()">💾 Save & Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     MODAL: AI Suggestions
+     ════════════════════════════════════════════════════════════ -->
+<div id="suggestionsModal" class="modal-overlay">
+  <div class="modal modal-lg">
+    <div class="modal-header">
+      <div>
+        <h3>⚡ AI Suggestions</h3>
+        <p>RAG + LLM generated definition fragments</p>
+      </div>
+      <button class="modal-close" onclick="closeSuggestionsModal()">×</button>
+    </div>
+    <div class="modal-body" id="suggestionsContent"></div>
+    <div class="modal-footer">
+      <button class="btn btn-sm btn-ghost" onclick="closeSuggestionsModal()">Cancel</button>
+      <button class="btn btn-sm btn-primary" onclick="useSelectedSuggestion()">✓ Use Selected</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     MODAL: Upload Excel
+     ════════════════════════════════════════════════════════════ -->
+<div id="uploadModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <h3>Upload Excel Data</h3>
+        <p>Upload <code>all_definitions_translated.xlsx</code> to build the RAG vector database.</p>
+      </div>
+      <button class="modal-close" onclick="closeUploadModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+        </svg>
+        <p>Click to select Excel file (.xlsx)</p>
+        <input id="fileInput" type="file" accept=".xlsx,.xls" style="display:none"
+               onchange="handleFileUpload(this)">
+      </div>
+      <div id="uploadStatus" style="margin-top:16px;text-align:center"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm" onclick="closeUploadModal()">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     MODAL: Project Settings (Context + BBF)
+     ════════════════════════════════════════════════════════════ -->
+<div id="settingsModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <h3>Project Settings</h3>
+        <p>Set invention context and BBF text for AI generation.</p>
+      </div>
+      <button class="modal-close" onclick="closeSettingsModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <label style="font-size:12px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px">
+        Invention Context
+      </label>
+      <input type="text" id="settingsContext"
+             placeholder="e.g. Antenna assembly for an aircraft"
+             style="margin-bottom:16px">
+      <label style="font-size:12px;font-weight:600;color:var(--text-secondary);display:block;margin-bottom:6px">
+        BBF Text (Background / Brief Description)
+      </label>
+      <textarea id="settingsBBF" rows="10"
+                placeholder="Paste the BBF / invention description text here…"></textarea>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-sm btn-ghost" onclick="closeSettingsModal()">Cancel</button>
+      <button class="btn btn-sm btn-primary" onclick="saveSettings()">Save</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/app.js"></script>
+</body>
+</html>
