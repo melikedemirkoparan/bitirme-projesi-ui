@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Patent Drafting Tool</title>
+  <link rel="stylesheet" href="/static/cs/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       HOME PAGE — Workspace selector + project creation
+       ═══════════════════════════════════════════════════════════ -->
+  <div class="dashboard">
+
+    <!-- Left sidebar: project list -->
+    <aside class="dashboard-sidebar">
+      <div class="sidebar-header">
+        <h2>Projects</h2>
+        <div class="sidebar-header-row">
+          <h3>Select a workspace</h3>
+          <button class="btn btn-icon btn-ghost" onclick="loadProjects()" title="Refresh">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+              <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <button class="btn btn-new-project" onclick="openNewProjectModal()">
+        <span>+</span> New Project
+      </button>
+
+      <div id="projectList" class="project-list">
+        <!-- Rendered by JS -->
+      </div>
+    </aside>
+
+    <!-- Right main area: branding + feature cards -->
+    <main class="dashboard-main">
+      <div class="dashboard-hero">
+        <!-- Logo text matching the screenshot -->
+        <h1><span class="hero-bold">TURKISH</span>AEROSPACE <span class="hero-icon">&#9992;</span></h1>
+
+        <div class="dashboard-cards">
+          <div class="dashboard-card">
+            <h4>Claims</h4>
+            <p>Manage nested element trees with clarity and precision.</p>
+          </div>
+          <div class="dashboard-card">
+            <h4>Drafting</h4>
+            <p>Author definitions with autosave, AI assist, and structured context.</p>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MODAL — New Project Creation
+       ═══════════════════════════════════════════════════════════ -->
+  <div id="newProjectModal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h3>Create New Project</h3>
+          <p>Set up a new patent drafting workspace</p>
+        </div>
+        <button class="modal-close" onclick="closeNewProjectModal()">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Step 1: Project metadata (always visible) -->
+        <div class="form-section">
+          <label class="form-label" for="inputPatentName">Patent / Project Name *</label>
+          <input type="text" id="inputPatentName" placeholder="e.g. Turbine Blade Assembly">
+
+          <label class="form-label" for="inputPatentOwner">Patent Owner *</label>
+          <input type="text" id="inputPatentOwner" placeholder="e.g. TUSAS Engine Industries">
+        </div>
+
+        <!-- Step 2: Document type selection -->
+        <div class="form-section">
+          <label class="form-label">Source Documents (optional)</label>
+          <p class="form-hint">Select which document types to include during project creation.</p>
+
+          <div class="doc-type-checks">
+            <label class="checkbox-label">
+              <input type="checkbox" id="chkDisclosure" onchange="toggleDocSection('disclosure')">
+              Invention Disclosure
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="chkResearch" onchange="toggleDocSection('research')">
+              Research Report
+            </label>
+            <label class="checkbox-label">
+              <input type="checkbox" id="chkQna" onchange="toggleDocSection('qna')">
+              Inventor Q&A
+            </label>
+          </div>
+        </div>
+
+        <!-- Dynamic document fields: shown/hidden based on checkbox state -->
+
+        <div id="sectionDisclosure" class="form-section doc-section" style="display:none;">
+          <h4 class="doc-section-title">Invention Disclosure</h4>
+          <label class="form-label" for="inputPriorArt">Prior Art and Problems</label>
+          <textarea id="inputPriorArt" rows="3" placeholder="Describe relevant prior art and its problems..."></textarea>
+
+          <label class="form-label" for="inputClosestPatents">Closest Prior Patents</label>
+          <textarea id="inputClosestPatents" rows="3" placeholder="List the closest prior patents..."></textarea>
+
+          <label class="form-label" for="inputNovelFeatures">Novel Features</label>
+          <textarea id="inputNovelFeatures" rows="3" placeholder="Describe the novel features of the invention..."></textarea>
+        </div>
+
+        <div id="sectionResearch" class="form-section doc-section" style="display:none;">
+          <h4 class="doc-section-title">Research Report</h4>
+          <label class="form-label" for="inputExecSummary">Executive Summary</label>
+          <textarea id="inputExecSummary" rows="3" placeholder="Provide an executive summary..."></textarea>
+
+          <label class="form-label" for="inputSearchStrategy">Search Strategy</label>
+          <textarea id="inputSearchStrategy" rows="3" placeholder="Describe the search strategy used..."></textarea>
+
+          <label class="form-label" for="inputClassification">Classification and Keywords</label>
+          <textarea id="inputClassification" rows="3" placeholder="Enter classification codes and keywords..."></textarea>
+
+          <label class="form-label" for="inputElementAnalysis">Element-Patent Analysis</label>
+          <textarea id="inputElementAnalysis" rows="3" placeholder="Provide element-patent analysis..."></textarea>
+        </div>
+
+        <div id="sectionQna" class="form-section doc-section" style="display:none;">
+          <h4 class="doc-section-title">Inventor Q&A</h4>
+          <label class="form-label" for="inputQna">Questions and Answers</label>
+          <textarea id="inputQna" rows="5" placeholder="Enter inventor questions and answers..."></textarea>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closeNewProjectModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitNewProject()">Create Project</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/jss/app.js"></script>
+</body>
+</html>
