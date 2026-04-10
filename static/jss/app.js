@@ -59,10 +59,7 @@ function renderProjectList(projects) {
 }
 
 function openProject(patentId) {
-  // Navigate to the project workspace.
-  // For now, log the intent — workspace page will be implemented later.
-  console.log('Open project:', patentId);
-  alert('Project workspace will be implemented in the next step. Patent ID: ' + patentId);
+  window.location.href = '/workspace?id=' + patentId;
 }
 
 // ═══════════════════════════════════════════════════════════════

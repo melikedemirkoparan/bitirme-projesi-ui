@@ -51,6 +51,8 @@ Examples include:
 - `docs/frontend_refactor.md`
 - `docs/current_status.md`
 - `docs/excel_upload_ingestion.md`
+- `docs/patent_inputs_specification.md`
+- `docs/definition_generator_specification.md`
 
 These docs may continue to evolve as the product grows.
 

@@ -419,6 +419,823 @@ textarea { resize: vertical; min-height: 80px; }
 }
 
 /* ═══════════════════════════════════════════════════════════════
+   PAGE: Claim Workspace
+   ═══════════════════════════════════════════════════════════════ */
+
+.workspace-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+/* ── Navbar ──────────────────────────────────────────────────── */
+.ws-navbar {
+  height: 52px;
+  min-height: 52px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  gap: 16px;
+  z-index: 100;
+}
+
+.ws-navbar-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+}
+
+.ws-navbar-logo {
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+}
+
+.ws-navbar-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--text-primary);
+  text-transform: uppercase;
+}
+
+.ws-status-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: rgba(90, 106, 136, 0.25);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.ws-navbar-center {
+  flex: 1;
+  text-align: center;
+}
+
+.ws-patent-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 400px;
+  display: inline-block;
+}
+
+.ws-navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  justify-content: flex-end;
+}
+
+/* ── 3-panel layout ──────────────────────────────────────────── */
+.ws-layout {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 0;
+  overflow: hidden;
+}
+
+/* ── Panels ──────────────────────────────────────────────────── */
+.ws-panel {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.ws-panel:last-child {
+  border-right: none;
+}
+
+.ws-panel-header {
+  padding: 14px 16px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-secondary);
+  flex-shrink: 0;
+}
+
+.ws-panel-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ws-panel-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.ws-panel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.ws-draft-claim-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 6px;
+}
+
+.ws-queue-hint {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(59, 74, 107, 0.45);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ws-queue-hint--active {
+  color: #9eb0d1;
+}
+
+.ws-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+.ws-empty-msg {
+  font-size: 12px;
+  color: var(--text-muted);
+  text-align: center;
+  padding: 40px 16px;
+}
+
+/* ── Left panel header ───────────────────────────────────────── */
+.ws-panel-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-top: 8px;
+  margin-bottom: 3px;
+}
+.ws-panel-subtitle {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ── Claim cards (left panel) ────────────────────────────────── */
+.claim-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px 12px 10px;
+  margin-bottom: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+.claim-card:hover { background: var(--bg-card-hover); border-color: var(--border-light); }
+.claim-card--independent { border-left-color: var(--accent); }
+.claim-card--dependent   { border-left-color: var(--warning); }
+.claim-card--selected    { background: var(--bg-card-hover); box-shadow: 0 0 0 1px var(--accent); border-color: var(--accent); }
+.claim-card--selected.claim-card--dependent { box-shadow: 0 0 0 1px var(--warning); border-color: var(--warning); }
+
+/* Claim card header row */
+.claim-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.claim-header-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: 1;
+  min-width: 0;
+}
+
+.claim-header-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+
+.claim-collapse-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  border-radius: 4px;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+.claim-collapse-btn:hover { color: var(--text-primary); }
+
+.claim-layers-icon { color: var(--accent); flex-shrink: 0; }
+
+.claim-card-number {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  white-space: nowrap;
+}
+
+/* Claim status badge */
+.claim-status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  white-space: nowrap;
+}
+.claim-status--ready {
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+}
+.claim-status--incomplete {
+  color: var(--warning);
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.3);
+}
+
+.claim-add-elem-btn { flex-shrink: 0; }
+
+/* Delete button */
+.claim-delete-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 3px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.claim-delete-btn:hover { color: var(--danger); background: rgba(239, 68, 68, 0.1); }
+
+/* Dependency hint */
+.claim-dep-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 5px;
+  margin-left: 22px;
+}
+
+/* ── Element tree inside claim card ──────────────────────────── */
+.claim-elem-tree {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.claim-elem-tree-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.elem-tree-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.8px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+/* ↑ ↓ ↺ controls */
+.elem-tree-controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.elem-tree-ctrl-btn {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: color 0.12s, border-color 0.12s, background 0.12s;
+}
+.elem-tree-ctrl-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--border-light);
+  background: var(--bg-card-hover);
+}
+.elem-tree-ctrl-btn--disabled,
+.elem-tree-ctrl-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+/* Search row */
+.elem-tree-search-row { margin-bottom: 6px; }
+
+.elem-tree-search {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 10px;
+  transition: border-color 0.15s;
+}
+.elem-tree-search:focus-within { border-color: var(--accent); }
+.elem-tree-search svg { color: var(--text-muted); flex-shrink: 0; }
+
+.elem-tree-search-input {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  width: 100%;
+}
+.elem-tree-search-input:focus { outline: none; box-shadow: none; }
+.elem-tree-search-input::placeholder { color: var(--text-muted); }
+
+/* Stats row */
+.elem-tree-stats {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 5px;
+}
+
+.elem-tree-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Element row */
+.tree-elem-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 6px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+.tree-elem-row:hover { background: rgba(255,255,255,0.04); }
+.tree-elem-row--selected {
+  background: rgba(59, 130, 246, 0.08);
+  border-color: rgba(59, 130, 246, 0.2);
+}
+
+.tree-elem-bullet { color: var(--text-muted); font-size: 16px; line-height: 1; flex-shrink: 0; }
+
+.tree-elem-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-elem-selected-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.8px;
+  color: var(--accent);
+  background: rgba(59, 130, 246, 0.12);
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  border-radius: 4px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+}
+
+.tree-elem-actions {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.tree-elem-def-icon { display: flex; }
+.def-icon--ready    { color: var(--success); }
+.def-icon--incomplete { color: var(--warning); }
+
+.tree-elem-unlink-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.tree-elem-unlink-btn:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
+
+/* ── Element cards (center panel) ───────────────────────────── */
+.element-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: linear-gradient(180deg, rgba(26, 34, 54, 0.98) 0%, rgba(24, 31, 48, 0.98) 100%);
+  border: 1px solid rgba(52, 67, 98, 0.85);
+  border-radius: 14px;
+  padding: 11px 14px;
+  margin-bottom: 10px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+
+.element-card:hover {
+  border-color: rgba(77, 97, 138, 0.95);
+  background: linear-gradient(180deg, rgba(30, 39, 61, 0.98) 0%, rgba(27, 35, 54, 0.98) 100%);
+  transform: translateY(-1px);
+}
+
+.element-card-icon {
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(59, 74, 107, 0.45);
+  color: var(--text-secondary);
+}
+
+.element-card-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.element-card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  line-height: 1.35;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.element-card-meta {
+  margin-top: 4px;
+}
+
+.element-ref {
+  font-size: 11px;
+  color: #9eb0d1;
+}
+
+.element-ref--muted {
+  color: var(--text-muted);
+}
+
+.element-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.element-drag-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin-right: 2px;
+}
+
+.element-edit-btn { color: var(--text-secondary); }
+.element-edit-btn:hover { color: var(--accent); }
+
+.element-delete-btn { color: var(--text-muted); }
+.element-delete-btn:hover { color: var(--danger); background: rgba(239,68,68,0.1); }
+
+/* ── Element Definition Modal ────────────────────────────────── */
+.elem-def-modal {
+  max-width: 560px;
+}
+
+.elem-def-header {
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.elem-def-header-left { flex: 1; }
+
+.elem-studio-label {
+  display: block;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+
+.elem-def-header-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+/* Breadcrumb + ID row */
+.elem-context-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+
+.elem-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(59, 130, 246, 0.08);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 6px;
+  padding: 3px 10px;
+}
+
+.elem-breadcrumb-section {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.elem-breadcrumb-sep {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.elem-breadcrumb-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.elem-id-badge {
+  font-size: 11px;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  color: var(--text-muted);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 3px 8px;
+}
+
+/* Element name + saved badge row */
+.elem-name-section { margin-bottom: 12px; }
+
+.elem-name-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.elem-name-field { flex: 1; }
+.elem-name-field .form-label { margin-top: 0; }
+
+.elem-saved-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--success);
+  background: rgba(34, 197, 94, 0.1);
+  border: 1px solid rgba(34, 197, 94, 0.25);
+  border-radius: 5px;
+  padding: 3px 8px;
+  white-space: nowrap;
+  margin-bottom: 2px;
+}
+
+.elem-slot-info {
+  margin-top: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'SF Mono', 'Fira Code', monospace;
+}
+
+/* Linked claims section */
+.linked-claims-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.linked-claim-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+}
+
+.linked-claim-number {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.linked-claim-slot {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+  border-radius: 4px;
+  padding: 2px 7px;
+}
+
+.elem-no-links {
+  font-size: 12px;
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+/* Divider between identity section and definition section */
+.elem-def-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 16px 0;
+}
+
+/* Definition toolbar */
+.elem-def-section { margin-bottom: 0; }
+
+.elem-def-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.elem-def-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.elem-def-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.elem-ai-btn { gap: 5px; }
+
+.elem-def-status {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+/* ── Radio group (Add Claim modal) ───────────────────────────── */
+.radio-group {
+  display: flex;
+  gap: 20px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.radio-label input[type="radio"] {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   Right panel — Drafting Workspace
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Header: make the right panel header a flex column */
+.ws-draft-panel-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+/* Row 1: section label + save status side by side */
+.ws-draft-header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Save status indicator */
+.ws-draft-save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* Row 3: action buttons */
+.ws-draft-action-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  flex-wrap: wrap;
+}
+
+/* Draft body: grow to fill remaining panel height */
+.ws-draft-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+
+/* Draft textarea: fills the entire body */
+.draft-textarea {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  padding: 16px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: none;
+  outline: none;
+  resize: none;
+  font-family: 'Inter', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-size: 13px;
+  line-height: 1.7;
+  caret-color: var(--accent);
+}
+
+.draft-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.draft-textarea:focus {
+  background: var(--bg-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════════════
    Responsive
    ═══════════════════════════════════════════════════════════════ */
 @media (max-width: 900px) {

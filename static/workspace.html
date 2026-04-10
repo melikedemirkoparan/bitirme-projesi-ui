@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claim Workspace — Patent Drafting Tool</title>
+  <link rel="stylesheet" href="/static/cs/style.css">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="workspace-page">
+
+  <!-- ═══════════════════════════════════════════════════════════
+       NAVBAR
+       ═══════════════════════════════════════════════════════════ -->
+  <nav class="ws-navbar">
+    <div class="ws-navbar-left">
+      <!-- Product logo / icon -->
+      <div class="ws-navbar-logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
+        </svg>
+      </div>
+      <span class="ws-navbar-title">PATENT DRAFTING TOOL</span>
+      <span class="ws-status-badge" id="statusBadge">No Data</span>
+    </div>
+
+    <div class="ws-navbar-center">
+      <span class="ws-patent-name" id="navPatentName">Loading…</span>
+    </div>
+
+    <div class="ws-navbar-right">
+      <button class="btn btn-sm btn-ghost" onclick="goHome()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+          <path d="M19 12H5M12 5l-7 7 7 7"/>
+        </svg>
+        Back to Home
+      </button>
+      <button class="btn btn-sm" onclick="goUpload()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Upload Data
+      </button>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       WORKSPACE — 3-panel layout
+       ═══════════════════════════════════════════════════════════ -->
+  <div class="ws-layout">
+
+    <!-- ── Left panel: Claims & Elements ──────────────────────── -->
+    <section class="ws-panel" id="panelClaims">
+      <div class="ws-panel-header">
+        <div class="ws-panel-title-row">
+          <span class="ws-panel-label">CLAIMS &amp; ELEMENTS</span>
+          <button class="btn btn-sm btn-primary" id="btnAddClaim" onclick="openAddClaimModal()">
+            + Add Claim
+          </button>
+        </div>
+        <h2 class="ws-panel-title">Claim Structures</h2>
+        <p class="ws-panel-subtitle">Manage your patent claims and element structures.</p>
+      </div>
+      <div class="ws-panel-body" id="claimList">
+        <!-- Rendered by workspace.js — Phase 5 -->
+        <p class="ws-empty-msg">No claims yet. Click "+ Add Claim" to get started.</p>
+      </div>
+    </section>
+
+    <!-- ── Center panel: LLM Extraction Queue ─────────────────── -->
+    <section class="ws-panel" id="panelQueue">
+      <div class="ws-panel-header">
+        <div class="ws-panel-title-row">
+          <span class="ws-panel-label">LLM EXTRACTION QUEUE</span>
+          <button class="btn btn-sm" id="btnAddElement" onclick="openAddElementModal()">
+            + Add Element
+          </button>
+        </div>
+        <div class="ws-queue-hint" id="queueHint">
+          No claim selected.
+        </div>
+      </div>
+      <div class="ws-panel-body" id="elementQueue">
+        <!-- Rendered by workspace.js — Phase 6 -->
+        <p class="ws-empty-msg">No elements yet. Add an element to start building the patent-level pool.</p>
+      </div>
+    </section>
+
+    <!-- ── Right panel: Claim Draft Editor ────────────────────── -->
+    <section class="ws-panel" id="panelDraft">
+      <div class="ws-panel-header ws-draft-panel-header">
+
+        <!-- Row 1: section label + save status -->
+        <div class="ws-draft-header-top">
+          <span class="ws-panel-label">DRAFTING WORKSPACE</span>
+          <div class="ws-draft-save-status" id="draftSaveStatus" style="visibility:hidden;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+              <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+            </svg>
+            <span id="draftSaveStatusText">Not saved yet</span>
+          </div>
+        </div>
+
+        <!-- Row 2: title + subtitle -->
+        <h2 class="ws-panel-title" style="margin-top:6px;">Claim Draft Editor</h2>
+        <p class="ws-panel-subtitle" id="draftClaimLabel">Select a claim to edit its draft text.</p>
+
+        <!-- Row 3: action buttons -->
+        <div class="ws-draft-action-row">
+          <button class="btn btn-sm" onclick="rewriteWithReport()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+            Rewrite with Report
+          </button>
+          <button class="btn btn-sm" id="btnSaveDraft" onclick="saveDraftText()" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+              <polyline points="17 21 17 13 7 13 7 21"/>
+              <polyline points="7 3 7 8 15 8"/>
+            </svg>
+            Save
+          </button>
+          <button class="btn btn-sm btn-primary" onclick="goToAIDraft()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+            Go to AI Draft
+          </button>
+        </div>
+
+      </div>
+      <div class="ws-draft-body" id="draftBody">
+        <p class="ws-empty-msg">No claim selected.</p>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MODAL — Add Claim
+       ═══════════════════════════════════════════════════════════ -->
+  <div id="addClaimModal" class="modal-overlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div>
+          <h3>Add Claim</h3>
+          <p>Define the claim type and dependency</p>
+        </div>
+        <button class="modal-close" onclick="closeAddClaimModal()">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- Dependency type -->
+        <div class="form-section">
+          <label class="form-label">Dependency Type *</label>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="claimDependencyType" value="independent"
+                     onchange="onDependencyTypeChange()" checked>
+              Independent
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="claimDependencyType" value="dependent"
+                     onchange="onDependencyTypeChange()">
+              Dependent
+            </label>
+          </div>
+        </div>
+
+        <!-- Category -->
+        <div class="form-section">
+          <label class="form-label" for="selectClaimCategory">Claim Category *</label>
+          <select id="selectClaimCategory">
+            <option value="apparatus">Apparatus</option>
+            <option value="method">Method</option>
+          </select>
+        </div>
+
+        <!-- Parent claim — only visible when dependent is selected -->
+        <div class="form-section" id="parentClaimSection" style="display:none;">
+          <label class="form-label" for="selectParentClaim">Parent Claim *</label>
+          <select id="selectParentClaim">
+            <option value="">— select a parent claim —</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closeAddClaimModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitAddClaim()">Add Claim</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MODAL — Element Definition (create + edit)
+       ═══════════════════════════════════════════════════════════ -->
+  <div id="elementDefModal" class="modal-overlay">
+    <div class="modal elem-def-modal">
+
+      <!-- Header -->
+      <div class="modal-header elem-def-header">
+        <div class="elem-def-header-left">
+          <span class="elem-studio-label">DRAFTING STUDIO</span>
+          <h3>Element Definition</h3>
+          <p>Precision drafting with AI assistance.</p>
+        </div>
+        <div class="elem-def-header-right">
+          <button class="btn btn-sm btn-ghost" onclick="closeElementDefModal()">Back to claims</button>
+          <button class="modal-close" onclick="closeElementDefModal()">&times;</button>
+        </div>
+      </div>
+
+      <div class="modal-body elem-def-body">
+
+        <!-- Breadcrumb + ID — edit mode only -->
+        <div id="elemContextRow" class="elem-context-row" style="display:none;">
+          <div class="elem-breadcrumb">
+            <span class="elem-breadcrumb-section">CLAIMS</span>
+            <span class="elem-breadcrumb-sep">›</span>
+            <span id="elemBreadcrumbName" class="elem-breadcrumb-name"></span>
+          </div>
+          <span id="elemIdBadge" class="elem-id-badge"></span>
+        </div>
+
+        <!-- Element name row -->
+        <div class="form-section elem-name-section">
+          <div class="elem-name-row">
+            <div class="elem-name-field">
+              <label class="form-label" for="defElementName">Element Name *</label>
+              <input type="text" id="defElementName" placeholder="e.g. Turbine Blade">
+            </div>
+            <span id="elemSavedBadge" class="elem-saved-badge" style="display:none;">Saved</span>
+          </div>
+          <div id="elemSlotInfo" class="elem-slot-info" style="display:none;"></div>
+        </div>
+
+        <!-- Reference number -->
+        <div class="form-section">
+          <label class="form-label" for="defReferenceNumber">Reference Number</label>
+          <input type="number" id="defReferenceNumber" min="0" step="1" placeholder="e.g. 12">
+        </div>
+
+        <!-- Linked claims context — populated in edit mode -->
+        <div class="form-section" id="linkedClaimsSection">
+          <label class="form-label">Linked Claims</label>
+          <div id="linkedClaimsList" class="linked-claims-list">
+            <p class="elem-no-links">No linked claims yet.</p>
+          </div>
+        </div>
+
+        <div class="elem-def-divider"></div>
+
+        <!-- Definition area -->
+        <div class="form-section elem-def-section">
+          <div class="elem-def-toolbar">
+            <div class="elem-def-toolbar-left">
+              <button class="btn btn-sm btn-primary elem-ai-btn" onclick="aiSuggestDefinition()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                </svg>
+                AI Suggest Definition
+              </button>
+            </div>
+            <div class="elem-def-toolbar-right">
+              <button class="btn btn-sm btn-ghost" onclick="copyDefinition()" title="Copy definition text">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+                  <rect x="9" y="9" width="13" height="13" rx="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                Copy
+              </button>
+              <button class="btn btn-sm btn-ghost" onclick="clearDefinition()" title="Clear definition text">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+                  <path d="M20 5H9l-7 7 7 7h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2z"/>
+                  <line x1="18" y1="9" x2="12" y2="15"/>
+                  <line x1="12" y1="9" x2="18" y2="15"/>
+                </svg>
+                Clear
+              </button>
+            </div>
+          </div>
+
+          <div class="elem-def-status" id="elemDefStatus">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+            Not saved yet
+          </div>
+
+          <textarea id="defDefinitionText" rows="7"
+                    placeholder="Enter the technical definition for this element…"
+                    oninput="onDefinitionInput()"></textarea>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" onclick="closeElementDefModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitElementDef()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/>
+            <polyline points="17 21 17 13 7 13 7 21"/>
+            <polyline points="7 3 7 8 15 8"/>
+          </svg>
+          Save &amp; Close
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MODAL — Link Element to Claim
+       ═══════════════════════════════════════════════════════════ -->
+  <div id="addElementsModal" class="modal-overlay">
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div>
+          <h3 id="addElemsModalTitle">Add Elements to Claim</h3>
+          <p>Link a patent-level element to this claim</p>
+        </div>
+        <button class="modal-close" onclick="closeAddElementsModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-section">
+          <label class="form-label" for="selectElemToLink">Element</label>
+          <select id="selectElemToLink">
+            <option value="">— select an element —</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeAddElementsModal()">Cancel</button>
+        <button class="btn btn-primary" id="btnConfirmLinkElem" onclick="submitLinkElement()">Link</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/jss/workspace.js"></script>
+</body>
+</html>
