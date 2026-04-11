@@ -38,9 +38,25 @@ function goHome() {
   window.location.href = '/';
 }
 
+async function loadIngestionStatus() {
+  try {
+    const data = await api('/ingestion/status');
+    if (data.has_data) {
+      const badge = document.getElementById('statusBadge');
+      if (badge) {
+        badge.textContent = 'Data Loaded';
+        badge.classList.add('ws-status-badge--loaded');
+      }
+    }
+  } catch (e) {
+    // Non-critical — badge stays "No Data" if the check fails
+    console.warn('Could not fetch ingestion status:', e);
+  }
+}
+
 function goUpload() {
-  // Upload page will be implemented in a later phase.
-  alert('Upload page coming soon.');
+  _resetUploadModal();
+  document.getElementById('uploadModal').classList.add('active');
 }
 
 // ── Patent info ─────────────────────────────────────────────────
@@ -883,6 +899,157 @@ async function submitElementDef() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Upload Data Modal — Phase B.1
+// ═══════════════════════════════════════════════════════════════
+
+function _resetUploadModal() {
+  document.getElementById('uploadFileInput').value = '';
+  document.getElementById('uploadFileName').textContent = 'No file selected';
+  document.getElementById('uploadFileSection').style.display = '';
+  document.getElementById('uploadStatus').style.display = 'none';
+  document.getElementById('uploadStatus').innerHTML = '';
+  document.getElementById('btnUploadSubmit').disabled = true;
+  document.getElementById('btnUploadSubmit').style.display = '';
+  document.getElementById('btnUploadCancel').disabled = false;
+  document.getElementById('btnUploadCancel').textContent = 'Cancel';
+}
+
+function closeUploadModal() {
+  document.getElementById('uploadModal').classList.remove('active');
+}
+
+function onUploadFileChange() {
+  const input = document.getElementById('uploadFileInput');
+  const label = document.getElementById('uploadFileName');
+  const btn   = document.getElementById('btnUploadSubmit');
+  if (input.files.length > 0) {
+    label.textContent = input.files[0].name;
+    btn.disabled = false;
+  } else {
+    label.textContent = 'No file selected';
+    btn.disabled = true;
+  }
+}
+
+async function submitUpload() {
+  const input = document.getElementById('uploadFileInput');
+  if (!input.files.length) return;
+
+  const file = input.files[0];
+
+  // ── Processing state ────────────────────────────────────────
+  _setUploadProcessing();
+
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    // Do NOT set Content-Type — browser must set multipart boundary
+    const res = await fetch('/api/ingestion/upload', {
+      method: 'POST',
+      body: formData,
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      _setUploadError(data.detail || 'Upload failed.');
+      return;
+    }
+
+    if (data.success) {
+      _setUploadSuccess(data);
+    } else {
+      _setUploadError(data.error || 'Ingestion failed.');
+    }
+  } catch (e) {
+    _setUploadError('Network error: ' + e.message);
+  }
+}
+
+function _setUploadProcessing() {
+  document.getElementById('uploadFileSection').style.display = 'none';
+  document.getElementById('btnUploadSubmit').disabled = true;
+  document.getElementById('btnUploadCancel').disabled = true;
+
+  const statusEl = document.getElementById('uploadStatus');
+  statusEl.className = 'upload-status upload-status--processing';
+  statusEl.style.display = 'flex';
+  statusEl.innerHTML = `
+    <div class="upload-spinner"></div>
+    <span>Processing… this may take a moment while embeddings are generated.</span>
+  `;
+}
+
+function _setUploadSuccess(data) {
+  // Update navbar status badge
+  const badge = document.getElementById('statusBadge');
+  if (badge) {
+    badge.textContent = 'Data Loaded';
+    badge.classList.add('ws-status-badge--loaded');
+  }
+
+  // Build collection summary rows
+  const created = data.collections.filter(c => c.status === 'created');
+
+  const rows = data.collections.map(c => `
+    <div class="upload-collection-row">
+      <span class="upload-coll-status upload-coll-status--${c.status}">
+        ${c.status.toUpperCase()}
+      </span>
+      <span class="upload-coll-name">${esc(c.collection_name)}</span>
+      ${c.doc_count ? `<span class="upload-coll-count">${c.doc_count.toLocaleString()} docs</span>` : ''}
+      ${c.reason    ? `<span class="upload-coll-reason">${esc(c.reason)}</span>` : ''}
+    </div>
+  `).join('');
+
+  const headline = created.length === 1
+    ? `Created 1 collection`
+    : `Created ${created.length} collections`;
+
+  const statusEl = document.getElementById('uploadStatus');
+  statusEl.className = 'upload-status upload-status--success';
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = `
+    <div class="upload-success-headline">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14">
+        <circle cx="12" cy="12" r="10"/><polyline points="9 12 11 14 15 10"/>
+      </svg>
+      ${headline}
+    </div>
+    <div class="upload-collection-list">${rows}</div>
+  `;
+
+  // Footer: hide Upload, rename Cancel → Close
+  document.getElementById('btnUploadSubmit').style.display = 'none';
+  document.getElementById('btnUploadCancel').disabled = false;
+  document.getElementById('btnUploadCancel').textContent = 'Close';
+}
+
+function _setUploadError(message) {
+  // Restore the file picker so the user can select a different file and retry
+  document.getElementById('uploadFileSection').style.display = '';
+
+  const statusEl = document.getElementById('uploadStatus');
+  statusEl.className = 'upload-status upload-status--error';
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = `
+    <div class="upload-error-headline">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      Upload failed
+    </div>
+    <div class="upload-error-message">${esc(message)}</div>
+  `;
+
+  // Re-enable so user can retry
+  document.getElementById('btnUploadSubmit').disabled = false;
+  document.getElementById('btnUploadCancel').disabled = false;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Init
 // ═══════════════════════════════════════════════════════════════
 
@@ -897,5 +1064,6 @@ document.addEventListener('DOMContentLoaded', () => {
   loadPatentInfo(patentId);
   loadClaims();
   loadElements();
+  loadIngestionStatus();
   updateQueueHint();
 });

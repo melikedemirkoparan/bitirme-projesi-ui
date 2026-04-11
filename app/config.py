@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
+    # Vector store — path for the persistent ChromaDB client
+    chroma_storage_path: str = "./storage"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

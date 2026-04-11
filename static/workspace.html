@@ -344,6 +344,56 @@
     </div>
   </div>
 
+  <!-- ═══════════════════════════════════════════════════════════
+       MODAL — Upload Data
+       ═══════════════════════════════════════════════════════════ -->
+  <div id="uploadModal" class="modal-overlay">
+    <div class="modal" style="max-width:480px;">
+      <div class="modal-header">
+        <div>
+          <h3>Upload Data</h3>
+          <p>Upload a patent Excel file to build the vector collections</p>
+        </div>
+        <button class="modal-close" onclick="closeUploadModal()">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <!-- File picker -->
+        <div class="form-section" id="uploadFileSection">
+          <label class="form-label">Excel File (.xlsx / .xls)</label>
+          <div class="upload-file-area">
+            <input type="file" id="uploadFileInput" accept=".xlsx,.xls"
+                   onchange="onUploadFileChange()" style="display:none;">
+            <label for="uploadFileInput" class="upload-file-btn">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              Choose file
+            </label>
+            <span id="uploadFileName" class="upload-file-name">No file selected</span>
+          </div>
+        </div>
+
+        <!-- Status area — hidden until upload starts -->
+        <div id="uploadStatus" class="upload-status" style="display:none;"></div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn" id="btnUploadCancel" onclick="closeUploadModal()">Cancel</button>
+        <button class="btn btn-primary" id="btnUploadSubmit" onclick="submitUpload()" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="17 8 12 3 7 8"/>
+            <line x1="12" y1="3" x2="12" y2="15"/>
+          </svg>
+          Upload
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script src="/static/jss/workspace.js"></script>
 </body>
 </html>

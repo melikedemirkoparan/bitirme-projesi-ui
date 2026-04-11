@@ -6,6 +6,7 @@ from app.routes.patents import router as patents_router
 from app.routes.claims import router as claims_router
 from app.routes.elements import router as elements_router
 from app.routes.claim_elements import router as claim_elements_router
+from app.routes.ingestion import router as ingestion_router
 
 app = FastAPI(title="Patent Drafting Tool")
 
@@ -14,6 +15,7 @@ app.include_router(patents_router)
 app.include_router(claims_router)
 app.include_router(elements_router)
 app.include_router(claim_elements_router)
+app.include_router(ingestion_router)
 
 # Serve static frontend files (JS, CSS, images)
 app.mount("/static", StaticFiles(directory="static"), name="static")
