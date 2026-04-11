@@ -2,7 +2,7 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    database_url: str = "postgresql://patent_user:patent_pass@localhost:5432/patent_db"
+    database_url: str = "postgresql+psycopg://patent_user:patent_pass_password123@localhost:5433/patent_db"
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 

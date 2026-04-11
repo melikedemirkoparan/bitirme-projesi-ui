@@ -3,6 +3,8 @@
 # persistent client.  Storage path comes from app settings so it
 # can be overridden via the .env file.
 
+from __future__ import annotations
+
 import chromadb
 
 from app.config import settings

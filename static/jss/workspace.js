@@ -830,8 +830,104 @@ function onDefinitionInput() {
   document.getElementById('elemDefStatus').innerHTML = _defStatusHtml('Unsaved changes');
 }
 
-function aiSuggestDefinition() {
-  alert('AI Suggest Definition — coming soon.');
+async function aiSuggestDefinition() {
+  const elemName = document.getElementById('defElementName').value.trim();
+  if (!elemName) {
+    alert('Please enter an element name first.');
+    return;
+  }
+
+  // Check if RAG data is loaded
+  let ragReady = false;
+  try {
+    const ragStatus = await api('/rag/data-status');
+    ragReady = ragStatus.loaded;
+  } catch (_) {}
+
+  if (!ragReady) {
+    alert('RAG data not loaded. Please upload the Excel data file first using "Upload Data".');
+    return;
+  }
+
+  const btn = document.querySelector('.elem-ai-btn');
+  const origHtml = btn.innerHTML;
+  btn.innerHTML = '<span class="upload-spinner" style="width:13px;height:13px;border-width:2px;"></span> Generating…';
+  btn.disabled = true;
+
+  try {
+    const result = await api('/rag/generate-definition', {
+      method: 'POST',
+      body: JSON.stringify({
+        element_name: elemName,
+        context: '',
+        bbf_text: '',
+        top_k: 5,
+      }),
+    });
+
+    // Fill the definition textarea with the result
+    if (result.final_definition) {
+      document.getElementById('defDefinitionText').value = result.final_definition;
+      document.getElementById('elemDefStatus').innerHTML = _defStatusHtml('AI suggestion applied — unsaved');
+    }
+
+    // Show suggestions modal if available
+    if (result.retrieved_examples || result.rag_fragment || result.bbf_fragment) {
+      showAiSuggestionsModal(result);
+    }
+  } catch (e) {
+    alert('AI generation failed: ' + e.message);
+  } finally {
+    btn.innerHTML = origHtml;
+    btn.disabled = false;
+  }
+}
+
+function showAiSuggestionsModal(result) {
+  const modal = document.getElementById('aiSuggestionsModal');
+  if (!modal) return;
+
+  const retrieved = result.retrieved_examples || [];
+  const ragFrag = result.rag_fragment || '';
+  const bbfFrag = result.bbf_fragment || '';
+  const finalDef = result.final_definition || '';
+
+  const content = document.getElementById('aiSuggestionsContent');
+  content.innerHTML = `
+    <div class="suggestions-grid">
+      <div class="suggestion-col">
+        <h5>RAG Fragment</h5>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">${esc(ragFrag)}</p>
+        <h5 style="margin-top:12px">Retrieved Examples (${retrieved.length})</h5>
+        ${retrieved.map(r => `
+          <div class="suggestion-example" onclick="applySuggestion('${esc(r.definition_en).replace(/'/g, "\\'")}')" style="cursor:pointer;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;">
+            <strong style="font-size:12px;">${esc(r.element_name_en)}</strong>
+            <span style="font-size:11px;display:block;color:var(--text-muted);margin-top:2px;">${esc((r.definition_en || '').substring(0, 150))}…</span>
+            <span style="font-size:10px;color:var(--text-muted);">Score: ${r.score}</span>
+          </div>
+        `).join('')}
+      </div>
+      <div class="suggestion-col">
+        <h5>BBF Fragment</h5>
+        <p style="font-size:12px;color:var(--text-secondary)">${esc(bbfFrag) || '<em>No BBF text provided</em>'}</p>
+        <div style="margin-top:24px;">
+          <h5>Final Definition</h5>
+          <p style="font-size:13px;color:var(--text-primary);font-weight:500;padding:12px;background:var(--bg-tertiary);border-radius:6px;">${esc(finalDef)}</p>
+        </div>
+      </div>
+    </div>
+  `;
+  modal.classList.add('active');
+}
+
+function applySuggestion(text) {
+  document.getElementById('defDefinitionText').value = text;
+  document.getElementById('elemDefStatus').innerHTML = _defStatusHtml('Suggestion applied — unsaved');
+}
+
+function closeAiSuggestionsModal() {
+  const modal = document.getElementById('aiSuggestionsModal');
+  if (modal) modal.classList.remove('active');
 }
 
 function copyDefinition() {
@@ -944,13 +1040,22 @@ async function submitUpload() {
     const formData = new FormData();
     formData.append('file', file);
 
-    // Do NOT set Content-Type — browser must set multipart boundary
+    // Upload to ChromaDB ingestion
     const res = await fetch('/api/ingestion/upload', {
       method: 'POST',
       body: formData,
     });
 
     const data = await res.json();
+
+    // Also upload to RAG/FAISS engine (best-effort)
+    try {
+      const ragForm = new FormData();
+      ragForm.append('file', file);
+      await fetch('/api/rag/upload-excel', { method: 'POST', body: ragForm });
+    } catch (_) {
+      console.warn('RAG upload failed (non-critical)');
+    }
 
     if (!res.ok) {
       _setUploadError(data.detail || 'Upload failed.');

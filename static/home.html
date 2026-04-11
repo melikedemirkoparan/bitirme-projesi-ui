@@ -5,145 +5,293 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Patent Drafting Tool</title>
   <link rel="stylesheet" href="/static/cs/style.css">
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
 
-  <!-- ═══════════════════════════════════════════════════════════
-       HOME PAGE — Workspace selector + project creation
-       ═══════════════════════════════════════════════════════════ -->
-  <div class="dashboard">
-
-    <!-- Left sidebar: project list -->
-    <aside class="dashboard-sidebar">
-      <div class="sidebar-header">
-        <h2>Projects</h2>
-        <div class="sidebar-header-row">
-          <h3>Select a workspace</h3>
-          <button class="btn btn-icon btn-ghost" onclick="loadProjects()" title="Refresh">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-              <path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
-            </svg>
-          </button>
-        </div>
-      </div>
-
-      <button class="btn btn-new-project" onclick="openNewProjectModal()">
-        <span>+</span> New Project
-      </button>
-
-      <div id="projectList" class="project-list">
-        <!-- Rendered by JS -->
-      </div>
-    </aside>
-
-    <!-- Right main area: branding + feature cards -->
-    <main class="dashboard-main">
-      <div class="dashboard-hero">
-        <!-- Logo text matching the screenshot -->
-        <h1><span class="hero-bold">TURKISH</span>AEROSPACE <span class="hero-icon">&#9992;</span></h1>
-
-        <div class="dashboard-cards">
-          <div class="dashboard-card">
-            <h4>Claims</h4>
-            <p>Manage nested element trees with clarity and precision.</p>
-          </div>
-          <div class="dashboard-card">
-            <h4>Drafting</h4>
-            <p>Author definitions with autosave, AI assist, and structured context.</p>
-          </div>
-        </div>
-      </div>
-    </main>
+<!-- ═══════════ NAVBAR ═══════════ -->
+<nav class="ws-navbar">
+  <div class="ws-navbar-left">
+    <div class="ws-navbar-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="22" height="22">
+        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+      </svg>
+    </div>
+    <span class="ws-navbar-title">PATENT DRAFTING TOOL</span>
+    <span class="ws-status-badge" id="statusBadge">No Data</span>
   </div>
+  <div class="ws-navbar-center">
+    <span class="ws-patent-name" id="navPatentName"></span>
+  </div>
+  <div class="ws-navbar-right">
+    <button class="btn btn-sm btn-ghost" onclick="goHome()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M19 12H5M12 5l-7 7 7 7"/></svg>
+      Back to Home
+    </button>
+    <button class="btn btn-sm" onclick="openUploadModal()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      Upload Data
+    </button>
+  </div>
+</nav>
 
-  <!-- ═══════════════════════════════════════════════════════════
-       MODAL — New Project Creation
-       ═══════════════════════════════════════════════════════════ -->
-  <div id="newProjectModal" class="modal-overlay">
-    <div class="modal">
-      <div class="modal-header">
-        <div>
-          <h3>Create New Project</h3>
-          <p>Set up a new patent drafting workspace</p>
+<!-- ═══════════ PAGE: Dashboard ═══════════ -->
+<div id="page-dashboard" class="page active">
+  <div class="dashboard">
+    <div class="dashboard-sidebar">
+      <h2>Projects</h2>
+      <h3>Select a workspace</h3>
+      <button class="btn btn-sm" onclick="openUploadModal()" style="margin-bottom:4px">📁 Upload Excel Data</button>
+      <button class="btn btn-primary btn-sm" onclick="createNewProject()">+ New Project</button>
+      <div id="projectList" class="project-list"></div>
+    </div>
+    <div class="dashboard-main">
+      <div class="dashboard-hero">
+        <h1>PATENT <span>DRAFTING</span> TOOL</h1>
+        <div class="dashboard-cards">
+          <div class="dashboard-card"><h4>Claims</h4><p>Manage nested element trees with clarity and precision.</p></div>
+          <div class="dashboard-card"><h4>Drafting</h4><p>Author definitions with AI-assist, and structured patent context.</p></div>
         </div>
-        <button class="modal-close" onclick="closeNewProjectModal()">&times;</button>
-      </div>
-
-      <div class="modal-body">
-        <!-- Step 1: Project metadata (always visible) -->
-        <div class="form-section">
-          <label class="form-label" for="inputPatentName">Patent / Project Name *</label>
-          <input type="text" id="inputPatentName" placeholder="e.g. Turbine Blade Assembly">
-
-          <label class="form-label" for="inputPatentOwner">Patent Owner *</label>
-          <input type="text" id="inputPatentOwner" placeholder="e.g. TUSAS Engine Industries">
-        </div>
-
-        <!-- Step 2: Document type selection -->
-        <div class="form-section">
-          <label class="form-label">Source Documents (optional)</label>
-          <p class="form-hint">Select which document types to include during project creation.</p>
-
-          <div class="doc-type-checks">
-            <label class="checkbox-label">
-              <input type="checkbox" id="chkDisclosure" onchange="toggleDocSection('disclosure')">
-              Invention Disclosure
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="chkResearch" onchange="toggleDocSection('research')">
-              Research Report
-            </label>
-            <label class="checkbox-label">
-              <input type="checkbox" id="chkQna" onchange="toggleDocSection('qna')">
-              Inventor Q&A
-            </label>
-          </div>
-        </div>
-
-        <!-- Dynamic document fields: shown/hidden based on checkbox state -->
-
-        <div id="sectionDisclosure" class="form-section doc-section" style="display:none;">
-          <h4 class="doc-section-title">Invention Disclosure</h4>
-          <label class="form-label" for="inputPriorArt">Prior Art and Problems</label>
-          <textarea id="inputPriorArt" rows="3" placeholder="Describe relevant prior art and its problems..."></textarea>
-
-          <label class="form-label" for="inputClosestPatents">Closest Prior Patents</label>
-          <textarea id="inputClosestPatents" rows="3" placeholder="List the closest prior patents..."></textarea>
-
-          <label class="form-label" for="inputNovelFeatures">Novel Features</label>
-          <textarea id="inputNovelFeatures" rows="3" placeholder="Describe the novel features of the invention..."></textarea>
-        </div>
-
-        <div id="sectionResearch" class="form-section doc-section" style="display:none;">
-          <h4 class="doc-section-title">Research Report</h4>
-          <label class="form-label" for="inputExecSummary">Executive Summary</label>
-          <textarea id="inputExecSummary" rows="3" placeholder="Provide an executive summary..."></textarea>
-
-          <label class="form-label" for="inputSearchStrategy">Search Strategy</label>
-          <textarea id="inputSearchStrategy" rows="3" placeholder="Describe the search strategy used..."></textarea>
-
-          <label class="form-label" for="inputClassification">Classification and Keywords</label>
-          <textarea id="inputClassification" rows="3" placeholder="Enter classification codes and keywords..."></textarea>
-
-          <label class="form-label" for="inputElementAnalysis">Element-Patent Analysis</label>
-          <textarea id="inputElementAnalysis" rows="3" placeholder="Provide element-patent analysis..."></textarea>
-        </div>
-
-        <div id="sectionQna" class="form-section doc-section" style="display:none;">
-          <h4 class="doc-section-title">Inventor Q&A</h4>
-          <label class="form-label" for="inputQna">Questions and Answers</label>
-          <textarea id="inputQna" rows="5" placeholder="Enter inventor questions and answers..."></textarea>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button class="btn" onclick="closeNewProjectModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="submitNewProject()">Create Project</button>
       </div>
     </div>
   </div>
+</div>
 
-  <script src="/static/jss/app.js"></script>
+<!-- ═══════════ PAGE: Workspace Editor ═══════════ -->
+<div id="page-editor" class="page">
+  <div class="ws-layout">
+
+    <!-- LEFT: Claims & Elements -->
+    <section class="ws-panel" id="panelClaims">
+      <div class="ws-panel-header">
+        <div class="ws-panel-title-row">
+          <span class="ws-panel-label">CLAIMS &amp; ELEMENTS</span>
+          <button class="btn btn-sm btn-primary" onclick="openAddClaimModal()">+ Add Claim</button>
+        </div>
+        <h2 class="ws-panel-title">Claim Structures</h2>
+        <p class="ws-panel-subtitle">Manage your patent claims and element structures.</p>
+      </div>
+      <div class="ws-panel-body" id="claimList"></div>
+    </section>
+
+    <!-- CENTER: LLM Extraction Queue -->
+    <section class="ws-panel" id="panelQueue">
+      <div class="ws-panel-header">
+        <div class="ws-panel-title-row">
+          <span class="ws-panel-label">LLM EXTRACTION QUEUE</span>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-sm" onclick="openExtractModal()">⚡ Extract</button>
+            <button class="btn btn-sm btn-primary" onclick="openAddElementModal()">+ Add Element</button>
+          </div>
+        </div>
+        <div class="ws-queue-hint" id="queueHint">No claim selected.</div>
+      </div>
+      <div class="ws-panel-body" id="elementQueue"></div>
+    </section>
+
+    <!-- RIGHT: Draft Editor -->
+    <section class="ws-panel" id="panelDraft">
+      <div class="ws-panel-header">
+        <div class="ws-panel-title-row">
+          <span class="ws-panel-label">DRAFTING WORKSPACE</span>
+          <button class="btn btn-sm" onclick="openSettingsModal()">⚙ Settings</button>
+        </div>
+        <h2 class="ws-panel-title">Claim Draft Editor</h2>
+        <p class="ws-panel-subtitle" id="draftClaimLabel">Select a claim to edit its draft text.</p>
+        <div class="ws-draft-action-row">
+          <button class="btn btn-sm" onclick="insertDraftReport()">📋 Assemble with Report</button>
+          <button class="btn btn-sm" id="btnSaveDraft" onclick="saveDraftText()" disabled>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+            Save
+          </button>
+          <button class="btn btn-sm btn-primary" onclick="goToAiDraft()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            Go to AI Draft
+          </button>
+          <button class="btn btn-sm" onclick="openComposer()">📝 Draft Composer</button>
+        </div>
+      </div>
+      <div class="ws-draft-body" id="draftBody">
+        <p class="ws-empty-msg">No claim selected.</p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<!-- ═══════════ PAGE: Draft Composer ═══════════ -->
+<div id="page-composer" class="page">
+  <div style="padding:12px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between">
+    <div>
+      <div class="panel-label">AI Draft Workspace</div>
+      <div class="panel-title">Patent Draft Composer</div>
+      <div class="panel-subtitle" style="margin-top:2px">Assembly of full draft from claim inputs and referenced context.</div>
+    </div>
+    <button class="btn btn-sm" onclick="backToEditor()">← Back to Editor</button>
+  </div>
+  <div class="composer-layout">
+    <div class="composer-panel">
+      <div class="composer-tabs"><div class="composer-tab active">Structured Claims</div></div>
+      <div class="composer-content">
+        <textarea id="composerClaimsInput" class="composer-textarea" rows="20" placeholder="Enter claim text…"></textarea>
+      </div>
+      <div class="composer-footer">
+        <button class="btn btn-sm" onclick="backToEditor()">Review Claims</button>
+      </div>
+    </div>
+    <div class="composer-panel">
+      <div class="composer-tabs"><div class="composer-tab active">Draft Output</div></div>
+      <div class="composer-content" id="composerDraftOutput"><p style="color:var(--text-muted)">Click "Generate Draft"…</p></div>
+      <div class="composer-footer">
+        <button id="btnGenerateDraft" class="btn btn-primary" onclick="generateDraft()">⚡ Generate Draft</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Add Claim ═══════════ -->
+<div id="addClaimModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header"><div><h3>Add Claim</h3><p>Define the claim type and dependency</p></div><button class="modal-close" onclick="closeModal('addClaimModal')">×</button></div>
+    <div class="modal-body">
+      <div class="form-section"><label class="form-label">Dependency Type</label>
+        <div style="display:flex;gap:12px">
+          <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px"><input type="radio" name="claimDepType" value="independent" checked onchange="toggleParentClaim()"> Independent</label>
+          <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px"><input type="radio" name="claimDepType" value="dependent" onchange="toggleParentClaim()"> Dependent</label>
+        </div>
+      </div>
+      <div class="form-section"><label class="form-label">Category</label><select id="claimCategory"><option value="apparatus">Apparatus</option><option value="method">Method</option></select></div>
+      <div class="form-section" id="parentClaimSection" style="display:none"><label class="form-label">Parent Claim</label><select id="parentClaimSelect"><option value="">— select —</option></select></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('addClaimModal')">Cancel</button><button class="btn btn-primary" onclick="submitAddClaim()">Add Claim</button></div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Add Element ═══════════ -->
+<div id="addElementModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header"><div><h3>Add Element</h3><p>Create a new element in the patent pool</p></div><button class="modal-close" onclick="closeModal('addElementModal')">×</button></div>
+    <div class="modal-body">
+      <div class="form-section"><label class="form-label">Element Name *</label><input type="text" id="newElementName" placeholder="e.g. Turbine Blade"></div>
+      <div class="form-section"><label class="form-label">Reference Number</label><input type="number" id="newElementRef" min="0" placeholder="e.g. 12"></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('addElementModal')">Cancel</button><button class="btn btn-primary" onclick="submitAddElement()">Add Element</button></div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Link Element ═══════════ -->
+<div id="linkElementModal" class="modal-overlay">
+  <div class="modal" style="max-width:420px">
+    <div class="modal-header"><div><h3 id="linkElemTitle">Add Elements to Claim</h3><p>Link a patent-level element to this claim</p></div><button class="modal-close" onclick="closeModal('linkElementModal')">×</button></div>
+    <div class="modal-body"><div class="form-section"><label class="form-label">Element</label><select id="linkElemSelect"><option value="">— select —</option></select></div></div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('linkElementModal')">Cancel</button><button class="btn btn-primary" onclick="submitLinkElement()">Link</button></div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Element Definition ═══════════ -->
+<div id="elemDefModal" class="modal-overlay">
+  <div class="modal elem-def-modal">
+    <div class="modal-header">
+      <div>
+        <span class="elem-studio-label">DRAFTING STUDIO</span>
+        <h3>Element Definition</h3>
+        <p>Precision drafting with AI assistance.</p>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:13px;color:var(--text-secondary);cursor:pointer" onclick="closeModal('elemDefModal')">Back to claims</span>
+        <button class="modal-close" onclick="closeModal('elemDefModal')">×</button>
+      </div>
+    </div>
+    <div class="modal-body">
+      <div id="elemContextRow" class="elem-context-row" style="display:none">
+        <span id="elemBreadcrumb" style="font-size:11px;color:var(--text-muted)"></span>
+        <span id="elemIdBadge" class="tag tag-blue" style="font-size:10px"></span>
+      </div>
+      <div class="form-section"><label class="form-label">Element Name *</label><input type="text" id="defElemName" placeholder="e.g. Turbine Blade"></div>
+      <div class="form-section"><label class="form-label">Reference Number</label><input type="number" id="defElemRef" min="0" step="1" placeholder="e.g. 12" style="max-width:160px"></div>
+      <div class="form-section"><label class="form-label">Linked Claims</label><div id="linkedClaimsList"><p style="font-size:12px;color:var(--text-muted)">No linked claims yet.</p></div></div>
+      <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+      <div class="elem-def-toolbar">
+        <div class="elem-def-toolbar-left">
+          <button class="btn btn-primary btn-sm" id="btnAiSuggest" onclick="aiSuggestDef()">⚡ AI Suggest Definition</button>
+        </div>
+        <div class="elem-def-toolbar-right">
+          <button class="btn btn-sm btn-ghost" onclick="navigator.clipboard.writeText(document.getElementById('defElemText').value)">📋 Copy</button>
+          <button class="btn btn-sm btn-ghost" onclick="document.getElementById('defElemText').value='';document.getElementById('defSaveStatus').textContent='Not saved yet'">🗑 Clear</button>
+        </div>
+      </div>
+      <div id="defSaveStatus" style="font-size:11px;color:var(--text-muted);margin:6px 0;display:flex;align-items:center;gap:4px">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Not saved yet
+      </div>
+      <textarea id="defElemText" rows="8" placeholder="Enter the technical definition for this element…" oninput="document.getElementById('defSaveStatus').innerHTML='<svg viewBox=\'0 0 24 24\' fill=\'none\' stroke=\'currentColor\' stroke-width=\'2\' width=\'12\' height=\'12\'><circle cx=\'12\' cy=\'12\' r=\'10\'/><polyline points=\'12 6 12 12 16 14\'/></svg> Unsaved changes'"></textarea>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('elemDefModal')">Cancel</button><button class="btn btn-primary" onclick="submitElemDef()">💾 Save &amp; Close</button></div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: AI Suggestions ═══════════ -->
+<div id="suggestionsModal" class="modal-overlay">
+  <div class="modal modal-lg">
+    <div class="modal-header"><div><h3>⚡ AI Suggestions</h3><p>RAG + LLM generated definition fragments</p></div><button class="modal-close" onclick="closeModal('suggestionsModal')">×</button></div>
+    <div class="modal-body" id="suggestionsContent"></div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('suggestionsModal')">Close</button><button class="btn btn-primary" onclick="closeModal('suggestionsModal')">✓ Use Selected</button></div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Upload ═══════════ -->
+<div id="uploadModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header"><div><h3>Upload Excel Data</h3><p>Upload translated Excel to build the RAG vector database.</p></div><button class="modal-close" onclick="closeModal('uploadModal')">×</button></div>
+    <div class="modal-body">
+      <div class="upload-zone" onclick="document.getElementById('fileInput').click()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="width:40px;height:40px;color:var(--text-muted);margin-bottom:12px"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        <p>Click to select Excel file (.xlsx)</p>
+        <input id="fileInput" type="file" accept=".xlsx,.xls" style="display:none" onchange="handleFileUpload(this)">
+      </div>
+      <div id="uploadStatus" style="margin-top:16px;text-align:center"></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('uploadModal')">Close</button></div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Extract ═══════════ -->
+<div id="extractModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header"><div><h3>⚡ Extract Elements from BBF + Report</h3><p>Upload documents to automatically extract patent elements.</p></div><button class="modal-close" onclick="closeModal('extractModal')">×</button></div>
+    <div class="modal-body">
+      <label class="form-label">BBF Document</label>
+      <div class="upload-zone" onclick="document.getElementById('bbfFileInput').click()" style="padding:20px;margin-bottom:16px">
+        <p id="bbfFileName" style="font-size:12px">Click to select BBF file</p>
+        <input id="bbfFileInput" type="file" accept=".docx,.pdf,.txt" style="display:none" onchange="document.getElementById('bbfFileName').textContent=this.files[0]?.name||'Click to select BBF file'">
+      </div>
+      <label class="form-label">Report Document</label>
+      <div class="upload-zone" onclick="document.getElementById('reportFileInput').click()" style="padding:20px;margin-bottom:16px">
+        <p id="reportFileName" style="font-size:12px">Click to select Report file</p>
+        <input id="reportFileInput" type="file" accept=".docx,.pdf,.txt" style="display:none" onchange="document.getElementById('reportFileName').textContent=this.files[0]?.name||'Click to select Report file'">
+      </div>
+      <div id="extractStatus" style="text-align:center"></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('extractModal')">Cancel</button><button id="btnExtract" class="btn btn-primary" onclick="startExtraction()">⚡ Extract Elements</button></div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Settings ═══════════ -->
+<div id="settingsModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header"><div><h3>Project Settings</h3><p>Set invention context and BBF text for AI generation.</p></div><button class="modal-close" onclick="closeModal('settingsModal')">×</button></div>
+    <div class="modal-body">
+      <div class="form-section"><label class="form-label">Invention Context</label><input type="text" id="settingsContext" placeholder="e.g. Antenna assembly for an aircraft"></div>
+      <div class="form-section"><label class="form-label">BBF Text</label><textarea id="settingsBBF" rows="6" placeholder="Paste the BBF / invention description text here…"></textarea></div>
+      <div style="border-top:1px solid var(--border);margin:16px 0"></div>
+      <div class="form-section">
+        <label class="form-label">LLM API URL (Colab ngrok)</label>
+        <input type="text" id="settingsLLMUrl" placeholder="e.g. https://abc123.ngrok.io">
+        <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Colab'da Mistral-7B çalıştırıp ngrok URL'sini buraya yapıştırın. Boş bırakılırsa fallback kullanılır.</p>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('settingsModal')">Cancel</button><button class="btn btn-primary" onclick="saveSettings()">Save</button></div>
+  </div>
+</div>
+
+<script src="/static/jss/app.js"></script>
 </body>
 </html>
