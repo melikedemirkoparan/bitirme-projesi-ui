@@ -42,6 +42,7 @@ COLLECTION_CONFIGS: list[dict] = [
             "description_title_tr",
             "source_file",
             "location_ref",
+            "all_elements_context_en",  # required for context-based filtering in retrieval
         ],
     },
     {
