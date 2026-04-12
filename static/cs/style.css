@@ -155,7 +155,7 @@ textarea { resize: vertical; min-height: 80px; }
    PAGE: Dashboard / Workspace Selection
    ═══════════════════════════════════════════════════════════════ */
 .page { display: none; }
-.page.active { display: flex; flex-direction: column; min-height: calc(100vh - 56px); }
+.page.active { display: flex; flex-direction: column; min-height: calc(100vh - 52px); }
 
 .dashboard {
   display: flex;
@@ -481,13 +481,13 @@ textarea { resize: vertical; min-height: 80px; }
   grid-template-columns: 1fr 1fr;
   gap: 0;
   flex: 1;
-  min-height: calc(100vh - 56px);
 }
 
 .composer-panel {
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  max-height: calc(100vh - 120px);
 }
 .composer-panel:first-child { border-right: 1px solid var(--border); }
 

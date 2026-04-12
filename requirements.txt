@@ -1,17 +1,23 @@
+# Core
 fastapi==0.115.12
 uvicorn[standard]==0.34.2
 sqlalchemy==2.0.40
 psycopg2-binary==2.9.10
+psycopg[binary]>=3.3
 alembic==1.15.2
 pydantic==2.11.2
 pydantic-settings==2.9.1
 python-dotenv==1.1.0
 python-multipart==0.0.20
 
-# Ingestion — Excel parsing
+# Data / Excel
 pandas>=2.0
 openpyxl>=3.1
 
-# Ingestion — vector store
-chromadb>=1.0
+# RAG — FAISS vector search
 sentence-transformers>=3.0
+faiss-cpu>=1.9
+torch>=2.0
+
+# LLM fallback + translation
+deep-translator>=1.11

@@ -341,24 +341,18 @@ async function dropElementOnClaim(event, claimId) {
   } catch (e) { console.error('Drop failed:', e); }
 }
 
-// ── Add Element ─────────────────────────────────────────────────
+// ── Add Element (opens Element Definition modal in create mode) ──
 function openAddElementModal() {
-  document.getElementById('newElementName').value = '';
-  document.getElementById('newElementRef').value = '';
-  document.getElementById('addElementModal').classList.add('active');
-  document.getElementById('newElementName').focus();
-}
-
-async function submitAddElement() {
-  const name = document.getElementById('newElementName').value.trim();
-  if (!name) { alert('Name required.'); return; }
-  const ref = document.getElementById('newElementRef').value.trim();
-  try {
-    await api('/patents/' + _patentId + '/elements', { method: 'POST', body: JSON.stringify({ element_name: name, reference_number: ref ? parseInt(ref) : null }) });
-    closeModal('addElementModal');
-    _elements = await api('/patents/' + _patentId + '/elements');
-    renderElementQueue();
-  } catch (e) { alert(e.message); }
+  _elemDefMode = 'create';
+  _elemDefId = null;
+  document.getElementById('defElemName').value = '';
+  document.getElementById('defElemRef').value = '';
+  document.getElementById('defElemText').value = '';
+  document.getElementById('defSaveStatus').innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg> Not saved yet';
+  document.getElementById('elemContextRow').style.display = 'none';
+  document.getElementById('linkedClaimsList').innerHTML = '<p style="font-size:12px;color:var(--text-muted)">No linked claims yet.</p>';
+  document.getElementById('elemDefModal').classList.add('active');
+  document.getElementById('defElemName').focus();
 }
 
 async function deleteElement(elementId) {
@@ -450,7 +444,7 @@ async function aiSuggestDef() {
 // ═══════════════════════════════════════════════════════════════
 function resetDraftPanel() {
   document.getElementById('draftClaimLabel').textContent = 'Select a claim to edit its draft text.';
-  document.getElementById('draftBody').innerHTML = '<p class="ws-empty-msg">No claim selected.</p>';
+  document.getElementById('draftBody').innerHTML = '<textarea class="draft-textarea" id="draftTextarea" placeholder="Select a claim or use Assemble / AI Draft buttons…"></textarea>';
   document.getElementById('btnSaveDraft').disabled = true;
 }
 
@@ -464,7 +458,7 @@ function onClaimSelected(claimId) {
 }
 
 async function saveDraftText() {
-  if (!_selectedClaimId) return;
+  if (!_selectedClaimId) { alert('Please select a claim first to save draft text.'); return; }
   const ta = document.getElementById('draftTextarea');
   if (!ta) return;
   try {
@@ -480,8 +474,9 @@ function insertDraftReport() {
     if (el.definition_text) defs.push(el.element_name + (el.reference_number ? ' (' + el.reference_number + ')' : '') + ': ' + el.definition_text);
   }); });
   const report = 'ELEMENT DEFINITIONS REPORT\n' + '═'.repeat(40) + '\n\n' + defs.join('\n\n') + '\n';
-  const ta = document.getElementById('draftTextarea');
-  if (ta) ta.value = report;
+  let ta = document.getElementById('draftTextarea');
+  if (!ta) { document.getElementById('draftBody').innerHTML = '<textarea class="draft-textarea" id="draftTextarea"></textarea>'; ta = document.getElementById('draftTextarea'); }
+  ta.value = report;
 }
 
 function goToAiDraft() {
@@ -493,10 +488,9 @@ function goToAiDraft() {
     });
     text += '\n';
   });
-  if (_selectedClaimId) {
-    const ta = document.getElementById('draftTextarea');
-    if (ta) ta.value = text;
-  }
+  let ta = document.getElementById('draftTextarea');
+  if (!ta) { document.getElementById('draftBody').innerHTML = '<textarea class="draft-textarea" id="draftTextarea"></textarea>'; ta = document.getElementById('draftTextarea'); }
+  ta.value = text;
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -647,5 +641,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (_dataLoaded) { document.getElementById('statusBadge').textContent = 'Data Loaded'; document.getElementById('statusBadge').classList.add('ws-status-badge--loaded'); }
   } catch (_) {}
   try { _projects = await api('/patents'); renderProjectList(); } catch (_) {}
+
+  // Load cached BBF text and LLM URL
+  try {
+    const ps = await api('/pipeline/extract-elements-status');
+    if (ps.bbf_text) _bbfText = ps.bbf_text;
+  } catch (_) {}
+  try {
+    const ls = await api('/rag/llm-status');
+    if (ls.url) console.log('[LLM] Remote URL:', ls.url);
+  } catch (_) {}
+
   showPage('page-dashboard');
 });

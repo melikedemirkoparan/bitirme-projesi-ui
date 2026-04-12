@@ -96,6 +96,15 @@ def _bg_run_pipeline(bbf_path, report_path):
                 "definition_en": definition_en,
             })
         _pipeline_status = {"status": "done", "error": None, "elements": elements, "bbf_text": bbf_text}
+
+        # Save bbf_text to file for persistence across restarts
+        try:
+            bbf_cache = Path(__file__).parent.parent.parent / "data" / ".cache" / "bbf_text.txt"
+            bbf_cache.parent.mkdir(parents=True, exist_ok=True)
+            bbf_cache.write_text(bbf_text, encoding="utf-8")
+            print(f"[BBF] Saved bbf_text to cache ({len(bbf_text)} chars)")
+        except Exception:
+            pass
     except Exception as e:
         _pipeline_status = {"status": "error", "error": str(e), "elements": [], "bbf_text": ""}
 
@@ -120,4 +129,12 @@ async def extract_elements(bbf: UploadFile = File(...), report: UploadFile = Fil
 
 @router.get("/extract-elements-status")
 def extract_elements_status():
+    # If bbf_text is empty but cache exists, load from cache
+    if not _pipeline_status.get("bbf_text") and _pipeline_status["status"] != "running":
+        try:
+            bbf_cache = Path(__file__).parent.parent.parent / "data" / ".cache" / "bbf_text.txt"
+            if bbf_cache.exists():
+                _pipeline_status["bbf_text"] = bbf_cache.read_text(encoding="utf-8")
+        except Exception:
+            pass
     return _pipeline_status
