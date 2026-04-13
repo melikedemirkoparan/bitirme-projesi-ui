@@ -43,6 +43,7 @@ function goHome() {
   _selectedClaimId = null;
   document.getElementById('navPatentName').textContent = '';
   document.getElementById('navPatentOwner').textContent = '';
+  const rb = document.getElementById('navRenameBtn'); if (rb) rb.style.display = 'none';
   showPage('page-dashboard');
 }
 
@@ -112,12 +113,18 @@ async function submitEditProject() {
   } catch (e) { alert(e.message); }
 }
 
+function renameCurrentProject() {
+  if (!_patentId) return;
+  openEditProject(_patentId);
+}
+
 async function openProject(patentId) {
   _patentId = patentId;
   try {
     const patent = await api('/patents/' + patentId);
     document.getElementById('navPatentName').textContent = patent.patent_name;
     document.getElementById('navPatentOwner').textContent = patent.patent_owner ? '— ' + patent.patent_owner : '';
+    const rb = document.getElementById('navRenameBtn'); if (rb) rb.style.display = 'inline-flex';
 
     const [claims, elements] = await Promise.all([api('/patents/' + patentId + '/claims'), api('/patents/' + patentId + '/elements')]);
     _claims = claims;
