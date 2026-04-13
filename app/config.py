@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     # Vector store — path for the persistent ChromaDB client
     chroma_storage_path: str = "./storage"
 
+    # Local filesystem root for user-uploaded patent input documents
+    uploads_path: str = "./uploads"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
 

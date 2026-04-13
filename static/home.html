@@ -21,6 +21,7 @@
   </div>
   <div class="ws-navbar-center">
     <span class="ws-patent-name" id="navPatentName"></span>
+    <span class="ws-patent-owner" id="navPatentOwner" style="font-size:12px;color:var(--text-muted);margin-left:8px"></span>
   </div>
   <div class="ws-navbar-right">
     <button class="btn btn-sm btn-ghost" onclick="goHome()">
@@ -144,6 +145,81 @@
         <button id="btnGenerateDraft" class="btn btn-primary" onclick="generateDraft()">⚡ Generate Draft</button>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: New Project ═══════════ -->
+<div id="newProjectModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header"><div><h3>New Project</h3><p>Create a new patent drafting project</p></div><button class="modal-close" onclick="closeModal('newProjectModal')">×</button></div>
+    <div class="modal-body">
+      <div class="form-section"><label class="form-label">Project Name *</label><input type="text" id="newProjectName" placeholder="e.g. Antenna assembly for aircraft"></div>
+      <div class="form-section"><label class="form-label">Patent Owner *</label><input type="text" id="newProjectOwner" placeholder="e.g. TUSAS"></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('newProjectModal')">Cancel</button><button class="btn btn-primary" onclick="submitNewProject()">Create</button></div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Patent Inputs (Buluşçu ile Yazışmalar) ═══════════ -->
+<div id="patentInputsModal" class="modal-overlay">
+  <div class="modal" style="max-width:720px">
+    <div class="modal-header">
+      <div>
+        <h3>Patent Inputs</h3>
+        <p>Manage structured project inputs for the selected patent.</p>
+      </div>
+      <button class="modal-close" onclick="closeModal('patentInputsModal')">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="patent-input-card">
+        <div class="patent-input-card-header">
+          <div>
+            <h4>Buluşçu ile Yazışmalar <span class="patent-input-card-tag">(Inventor_QA)</span></h4>
+            <p>Inventor questions, answers, and clarification notes. You can also attach related documents.</p>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <label class="form-label">Questions &amp; Answers</label>
+          <textarea id="inventorQaText" rows="8"
+                    placeholder="Inventor ile yapılan görüşmelerden gelen soru-cevap ve açıklama notlarını buraya girin…"></textarea>
+        </div>
+
+        <div class="form-section">
+          <label class="form-label">Documents</label>
+          <div class="upload-file-area">
+            <input type="file" id="inventorQaFileInput" style="display:none"
+                   onchange="onInventorQaFileChange()"
+                   accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt,.png,.jpg,.jpeg">
+            <label for="inventorQaFileInput" class="btn btn-sm">
+              📎 Choose document
+            </label>
+            <span id="inventorQaFileName" class="upload-file-name">No file selected</span>
+            <button class="btn btn-sm btn-primary" id="btnUploadInventorQaDoc"
+                    onclick="uploadInventorQaDocument()" disabled>Upload</button>
+          </div>
+          <div id="inventorQaDocList" class="patent-input-doc-list">
+            <p class="ws-empty-msg" style="margin:6px 0">No documents uploaded yet.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('patentInputsModal')">Close</button>
+      <button class="btn btn-primary" onclick="saveInventorQaText()">Save Q&amp;A Text</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Edit Project ═══════════ -->
+<div id="editProjectModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header"><div><h3>Edit Project</h3><p>Update project name and patent owner</p></div><button class="modal-close" onclick="closeModal('editProjectModal')">×</button></div>
+    <div class="modal-body">
+      <div class="form-section"><label class="form-label">Project Name *</label><input type="text" id="editProjectName"></div>
+      <div class="form-section"><label class="form-label">Patent Owner *</label><input type="text" id="editProjectOwner"></div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('editProjectModal')">Cancel</button><button class="btn btn-primary" onclick="submitEditProject()">Save</button></div>
   </div>
 </div>
 

@@ -35,6 +35,11 @@ class PatentCreate(BaseModel):
     inventor_qna: InventorQACreate | None = None
 
 
+class PatentUpdate(BaseModel):
+    patent_name: str | None = None
+    patent_owner: str | None = None
+
+
 # ── Response schemas ────────────────────────────────────────────
 
 class PatentSummary(BaseModel):

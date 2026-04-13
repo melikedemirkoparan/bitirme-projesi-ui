@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.schemas.patent import PatentCreate, PatentDetail, PatentSummary
+from app.schemas.patent import PatentCreate, PatentDetail, PatentSummary, PatentUpdate
 from app.services import patent_service
 
 router = APIRouter(prefix="/api/patents", tags=["patents"])
@@ -24,6 +24,14 @@ def get_patent(patent_id: int, db: Session = Depends(get_db)):
 @router.post("", response_model=PatentDetail, status_code=201)
 def create_patent(data: PatentCreate, db: Session = Depends(get_db)):
     return patent_service.create_patent(db, data)
+
+
+@router.patch("/{patent_id}", response_model=PatentDetail)
+def update_patent(patent_id: int, data: PatentUpdate, db: Session = Depends(get_db)):
+    patent = patent_service.update_patent(db, patent_id, data)
+    if not patent:
+        raise HTTPException(status_code=404, detail="Patent not found")
+    return patent
 
 
 @router.delete("/{patent_id}", status_code=204)

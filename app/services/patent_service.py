@@ -4,7 +4,7 @@ from app.models.patent import Patent
 from app.models.invention_disclosure import InventionDisclosure
 from app.models.research_report import ResearchReport
 from app.models.inventor_qa import InventorQA
-from app.schemas.patent import PatentCreate
+from app.schemas.patent import PatentCreate, PatentUpdate
 
 
 def list_patents(db: Session) -> list[Patent]:
@@ -53,6 +53,19 @@ def create_patent(db: Session, data: PatentCreate) -> Patent:
             questions_and_answers=data.inventor_qna.questions_and_answers,
         ))
 
+    db.commit()
+    db.refresh(patent)
+    return patent
+
+
+def update_patent(db: Session, patent_id: int, data: PatentUpdate) -> Patent | None:
+    patent = get_patent(db, patent_id)
+    if not patent:
+        return None
+    if data.patent_name is not None:
+        patent.patent_name = data.patent_name
+    if data.patent_owner is not None:
+        patent.patent_owner = data.patent_owner
     db.commit()
     db.refresh(patent)
     return patent

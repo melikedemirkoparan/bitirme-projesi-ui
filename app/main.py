@@ -9,6 +9,7 @@ from app.routes.elements import router as elements_router
 from app.routes.claim_elements import router as claim_elements_router
 from app.routes.rag import router as rag_router
 from app.routes.bbf_pipeline import router as bbf_pipeline_router
+from app.routes.inventor_qa import router as inventor_qa_router
 
 app = FastAPI(title="Patent Drafting Tool")
 
@@ -28,6 +29,7 @@ app.include_router(elements_router)
 app.include_router(claim_elements_router)
 app.include_router(rag_router)
 app.include_router(bbf_pipeline_router)
+app.include_router(inventor_qa_router)
 
 # Serve static frontend files (JS, CSS, images)
 app.mount("/static", StaticFiles(directory="static"), name="static")

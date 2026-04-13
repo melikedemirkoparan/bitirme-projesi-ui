@@ -16,6 +16,7 @@ let _dataLoaded = false;
 let _context = '';
 let _bbfText = '';
 let _composerDraft = '';
+let _editProjectId = null;
 
 // ── Helpers ─────────────────────────────────────────────────────
 function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -41,6 +42,7 @@ function goHome() {
   _patentId = null;
   _selectedClaimId = null;
   document.getElementById('navPatentName').textContent = '';
+  document.getElementById('navPatentOwner').textContent = '';
   showPage('page-dashboard');
 }
 
@@ -54,15 +56,60 @@ function renderProjectList() {
   list.innerHTML = _projects.map(p => `
     <div class="project-item" onclick="openProject(${p.patent_id})">
       <div><div class="project-item-name">${esc(p.patent_name)}</div><div class="project-item-sub">${esc(p.patent_owner||'')}</div></div>
-      <span class="btn btn-sm btn-ghost">Open</span>
+      <span style="display:flex;gap:4px">
+        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openPatentInputs(${p.patent_id})" title="Patent Inputs">📋 Inputs</button>
+        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openEditProject(${p.patent_id})">✎ Edit</button>
+        <span class="btn btn-sm btn-ghost">Open</span>
+      </span>
     </div>`).join('');
 }
 
-async function createNewProject() {
-  const name = prompt('Project name:');
-  if (!name) return;
-  const owner = prompt('Patent owner (optional):') || 'TUSAS';
-  try { const p = await api('/patents', { method: 'POST', body: JSON.stringify({ patent_name: name, patent_owner: owner }) }); _projects.unshift(p); renderProjectList(); } catch (e) { alert(e.message); }
+function createNewProject() {
+  document.getElementById('newProjectName').value = '';
+  document.getElementById('newProjectOwner').value = '';
+  document.getElementById('newProjectModal').classList.add('active');
+}
+
+async function submitNewProject() {
+  const name = document.getElementById('newProjectName').value.trim();
+  const owner = document.getElementById('newProjectOwner').value.trim();
+  if (!name) { alert('Project name is required'); return; }
+  if (!owner) { alert('Patent owner is required'); return; }
+  try {
+    const p = await api('/patents', { method: 'POST', body: JSON.stringify({ patent_name: name, patent_owner: owner }) });
+    _projects.unshift(p);
+    renderProjectList();
+    closeModal('newProjectModal');
+  } catch (e) { alert(e.message); }
+}
+
+function openEditProject(patentId) {
+  const p = _projects.find(x => x.patent_id === patentId);
+  if (!p) return;
+  _editProjectId = patentId;
+  document.getElementById('editProjectName').value = p.patent_name || '';
+  document.getElementById('editProjectOwner').value = p.patent_owner || '';
+  document.getElementById('editProjectModal').classList.add('active');
+}
+
+async function submitEditProject() {
+  if (!_editProjectId) return;
+  const name = document.getElementById('editProjectName').value.trim();
+  const owner = document.getElementById('editProjectOwner').value.trim();
+  if (!name) { alert('Project name is required'); return; }
+  if (!owner) { alert('Patent owner is required'); return; }
+  try {
+    const updated = await api('/patents/' + _editProjectId, { method: 'PATCH', body: JSON.stringify({ patent_name: name, patent_owner: owner }) });
+    const idx = _projects.findIndex(x => x.patent_id === _editProjectId);
+    if (idx !== -1) _projects[idx] = { ..._projects[idx], patent_name: updated.patent_name, patent_owner: updated.patent_owner };
+    renderProjectList();
+    if (_patentId === _editProjectId) {
+      document.getElementById('navPatentName').textContent = updated.patent_name;
+      document.getElementById('navPatentOwner').textContent = updated.patent_owner ? '— ' + updated.patent_owner : '';
+    }
+    _editProjectId = null;
+    closeModal('editProjectModal');
+  } catch (e) { alert(e.message); }
 }
 
 async function openProject(patentId) {
@@ -70,6 +117,7 @@ async function openProject(patentId) {
   try {
     const patent = await api('/patents/' + patentId);
     document.getElementById('navPatentName').textContent = patent.patent_name;
+    document.getElementById('navPatentOwner').textContent = patent.patent_owner ? '— ' + patent.patent_owner : '';
 
     const [claims, elements] = await Promise.all([api('/patents/' + patentId + '/claims'), api('/patents/' + patentId + '/elements')]);
     _claims = claims;
@@ -630,6 +678,122 @@ async function saveSettings() {
   closeModal('settingsModal');
 }
 function openUploadModal() { document.getElementById('uploadModal').classList.add('active'); }
+
+// ═══════════════════════════════════════════════════════════════
+// Patent Inputs — Inventor_QA (Buluşçu ile Yazışmalar)
+// ═══════════════════════════════════════════════════════════════
+let _inputsPatentId = null;
+
+async function openPatentInputs(patentId) {
+  _inputsPatentId = patentId;
+  document.getElementById('inventorQaText').value = '';
+  document.getElementById('inventorQaFileInput').value = '';
+  document.getElementById('inventorQaFileName').textContent = 'No file selected';
+  document.getElementById('btnUploadInventorQaDoc').disabled = true;
+  document.getElementById('inventorQaDocList').innerHTML =
+    '<p class="ws-empty-msg" style="margin:6px 0">Loading…</p>';
+  document.getElementById('patentInputsModal').classList.add('active');
+  await loadInventorQa();
+}
+
+async function loadInventorQa() {
+  if (!_inputsPatentId) return;
+  try {
+    const qa = await api('/patents/' + _inputsPatentId + '/inventor-qa');
+    document.getElementById('inventorQaText').value = qa.questions_and_answers || '';
+    renderInventorQaDocs(qa.documents || []);
+  } catch (e) {
+    document.getElementById('inventorQaDocList').innerHTML =
+      '<p class="ws-empty-msg" style="margin:6px 0;color:var(--danger)">' + esc(e.message) + '</p>';
+  }
+}
+
+function renderInventorQaDocs(docs) {
+  const box = document.getElementById('inventorQaDocList');
+  if (!docs.length) {
+    box.innerHTML = '<p class="ws-empty-msg" style="margin:6px 0">No documents uploaded yet.</p>';
+    return;
+  }
+  box.innerHTML = docs.map(d => `
+    <div class="patent-input-doc-row">
+      <span class="patent-input-doc-name">📄 ${esc(d.original_filename)}</span>
+      <span class="patent-input-doc-meta">${formatBytes(d.size_bytes)}</span>
+      <span class="patent-input-doc-actions">
+        <a class="btn btn-sm btn-ghost" href="/api/patents/${_inputsPatentId}/inventor-qa/documents/${d.document_id}" target="_blank">Download</a>
+        <button class="btn btn-sm btn-ghost" onclick="deleteInventorQaDocument(${d.document_id})">🗑</button>
+      </span>
+    </div>`).join('');
+}
+
+function formatBytes(n) {
+  if (!n && n !== 0) return '';
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+  return (n / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function onInventorQaFileChange() {
+  const input = document.getElementById('inventorQaFileInput');
+  const label = document.getElementById('inventorQaFileName');
+  const btn = document.getElementById('btnUploadInventorQaDoc');
+  if (input.files.length) {
+    label.textContent = input.files[0].name;
+    btn.disabled = false;
+  } else {
+    label.textContent = 'No file selected';
+    btn.disabled = true;
+  }
+}
+
+async function uploadInventorQaDocument() {
+  if (!_inputsPatentId) return;
+  const input = document.getElementById('inventorQaFileInput');
+  if (!input.files.length) return;
+  const form = new FormData();
+  form.append('file', input.files[0]);
+  const btn = document.getElementById('btnUploadInventorQaDoc');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/patents/' + _inputsPatentId + '/inventor-qa/documents', {
+      method: 'POST',
+      body: form,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || ('Upload failed (' + res.status + ')'));
+    }
+    const qa = await res.json();
+    renderInventorQaDocs(qa.documents || []);
+    input.value = '';
+    document.getElementById('inventorQaFileName').textContent = 'No file selected';
+  } catch (e) {
+    alert(e.message);
+  } finally {
+    btn.disabled = !input.files.length;
+  }
+}
+
+async function deleteInventorQaDocument(documentId) {
+  if (!_inputsPatentId) return;
+  if (!confirm('Delete this document?')) return;
+  try {
+    await api('/patents/' + _inputsPatentId + '/inventor-qa/documents/' + documentId, { method: 'DELETE' });
+    await loadInventorQa();
+  } catch (e) { alert(e.message); }
+}
+
+async function saveInventorQaText() {
+  if (!_inputsPatentId) return;
+  const text = document.getElementById('inventorQaText').value;
+  try {
+    const qa = await api('/patents/' + _inputsPatentId + '/inventor-qa', {
+      method: 'PUT',
+      body: JSON.stringify({ questions_and_answers: text }),
+    });
+    renderInventorQaDocs(qa.documents || []);
+    alert('Saved.');
+  } catch (e) { alert(e.message); }
+}
 
 // ═══════════════════════════════════════════════════════════════
 // Init
