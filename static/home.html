@@ -344,6 +344,12 @@
         <p id="reportFileName" style="font-size:12px">Click to select Report file</p>
         <input id="reportFileInput" type="file" accept=".docx,.pdf,.txt" style="display:none" onchange="document.getElementById('reportFileName').textContent=this.files[0]?.name||'Click to select Report file'">
       </div>
+      <label class="form-label">Buluşçu ile Yazışmalar <span style="color:var(--accent);font-weight:500">(Inventor_QA)</span> <span style="color:var(--text-muted);font-weight:400">— optional</span></label>
+      <div class="upload-zone" onclick="document.getElementById('inventorQaExtractFileInput').click()" style="padding:20px;margin-bottom:8px">
+        <p id="inventorQaExtractFileName" style="font-size:12px">Click to select Inventor_QA file</p>
+        <input id="inventorQaExtractFileInput" type="file" accept=".pdf,.doc,.docx,.txt,.md,.rtf,.odt,.png,.jpg,.jpeg" style="display:none" onchange="document.getElementById('inventorQaExtractFileName').textContent=this.files[0]?.name||'Click to select Inventor_QA file'">
+      </div>
+      <div id="inventorQaExtractDocList" class="patent-input-doc-list" style="margin-bottom:12px"></div>
       <div id="extractStatus" style="text-align:center"></div>
     </div>
     <div class="modal-footer"><button class="btn" onclick="closeModal('extractModal')">Cancel</button><button id="btnExtract" class="btn btn-primary" onclick="startExtraction()">⚡ Extract Elements</button></div>

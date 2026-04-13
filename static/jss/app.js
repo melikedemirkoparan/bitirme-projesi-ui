@@ -582,22 +582,52 @@ function backToEditor() { showPage('page-editor'); }
 function openExtractModal() {
   document.getElementById('bbfFileInput').value = '';
   document.getElementById('reportFileInput').value = '';
+  document.getElementById('inventorQaExtractFileInput').value = '';
   document.getElementById('bbfFileName').textContent = 'Click to select BBF file';
   document.getElementById('reportFileName').textContent = 'Click to select Report file';
+  document.getElementById('inventorQaExtractFileName').textContent = 'Click to select Inventor_QA file';
+  document.getElementById('inventorQaExtractDocList').innerHTML = '';
   document.getElementById('extractStatus').innerHTML = '';
   document.getElementById('btnExtract').disabled = false;
   document.getElementById('btnExtract').innerHTML = '⚡ Extract Elements';
   document.getElementById('extractModal').classList.add('active');
+  refreshInventorQaExtractDocs();
+}
+
+async function refreshInventorQaExtractDocs() {
+  const box = document.getElementById('inventorQaExtractDocList');
+  if (!_patentId || !box) { if (box) box.innerHTML = ''; return; }
+  try {
+    const qa = await api('/patents/' + _patentId + '/inventor-qa');
+    const docs = qa.documents || [];
+    if (!docs.length) {
+      box.innerHTML = '<p class="ws-empty-msg" style="margin:4px 0;font-size:11px">No Inventor_QA documents uploaded yet.</p>';
+      return;
+    }
+    box.innerHTML = '<div style="font-size:11px;color:var(--text-muted);margin-bottom:4px">Existing Inventor_QA documents:</div>' + docs.map(d => `
+      <div class="patent-input-doc-row">
+        <span class="patent-input-doc-name">📄 ${esc(d.original_filename)}</span>
+        <span class="patent-input-doc-meta">${formatBytes(d.size_bytes)}</span>
+      </div>`).join('');
+  } catch (_) { box.innerHTML = ''; }
 }
 
 async function startExtraction() {
   const bbf = document.getElementById('bbfFileInput').files[0];
   const rep = document.getElementById('reportFileInput').files[0];
-  if (!bbf || !rep) { alert('Both files required.'); return; }
+  const qaFile = document.getElementById('inventorQaExtractFileInput').files[0];
+  if (!bbf || !rep) { alert('BBF and Report files are required.'); return; }
   const btn = document.getElementById('btnExtract');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Extracting…';
   document.getElementById('extractStatus').innerHTML = '<span class="loading-text"><span class="spinner"></span> Running pipeline…</span>';
   try {
+    if (qaFile && _patentId) {
+      const qaForm = new FormData(); qaForm.append('file', qaFile);
+      try {
+        await fetch('/api/patents/' + _patentId + '/inventor-qa/documents', { method: 'POST', body: qaForm });
+        await refreshInventorQaExtractDocs();
+      } catch (_) {}
+    }
     const form = new FormData(); form.append('bbf', bbf); form.append('report', rep);
     await fetch('/api/pipeline/extract-elements', { method: 'POST', body: form });
     const poll = setInterval(async () => {
