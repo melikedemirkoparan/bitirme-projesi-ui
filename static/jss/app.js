@@ -519,11 +519,21 @@ async function saveDraftText() {
   if (!_selectedClaimId) { alert('Please select a claim first to save draft text.'); return; }
   const ta = document.getElementById('draftTextarea');
   if (!ta) return;
+  const btn = document.getElementById('btnSaveDraft');
+  const original = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.innerHTML = 'Saving…'; }
   try {
     await api('/patents/' + _patentId + '/claims/' + _selectedClaimId + '/text', { method: 'PATCH', body: JSON.stringify({ claim_text: ta.value }) });
     const cl = _claims.find(c => c.claim_id === _selectedClaimId);
     if (cl) cl.claim_text = ta.value;
-  } catch (e) { alert(e.message); }
+    if (btn) {
+      btn.innerHTML = '✓ Saved';
+      setTimeout(() => { btn.innerHTML = original; btn.disabled = false; }, 1200);
+    }
+  } catch (e) {
+    if (btn) { btn.innerHTML = original; btn.disabled = false; }
+    alert(e.message);
+  }
 }
 
 function insertDraftReport() {
