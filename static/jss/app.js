@@ -55,13 +55,16 @@ function renderProjectList() {
   if (!list) return;
   if (_projects.length === 0) { list.innerHTML = '<p style="color:var(--text-muted);font-size:12px;padding:8px">No projects yet.</p>'; return; }
   list.innerHTML = _projects.map(p => `
-    <div class="project-item" onclick="openProject(${p.patent_id})">
-      <div><div class="project-item-name">${esc(p.patent_name)}</div><div class="project-item-sub">${esc(p.patent_owner||'')}</div></div>
-      <span style="display:flex;gap:4px">
+    <div class="project-item project-item--stacked" onclick="openProject(${p.patent_id})">
+      <div class="project-item-info">
+        <div class="project-item-name">${esc(p.patent_name)}</div>
+        <div class="project-item-sub">${esc(p.patent_owner||'')}</div>
+      </div>
+      <div class="project-item-actions">
         <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openPatentInputs(${p.patent_id})" title="Patent Inputs">📋 Inputs</button>
-        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openEditProject(${p.patent_id})">✎ Edit</button>
+        <button class="btn btn-sm btn-ghost" onclick="event.stopPropagation();openEditProject(${p.patent_id})" title="Edit project">✎ Edit</button>
         <span class="btn btn-sm btn-ghost">Open</span>
-      </span>
+      </div>
     </div>`).join('');
 }
 

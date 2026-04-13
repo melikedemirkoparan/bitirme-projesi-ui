@@ -208,6 +208,9 @@ textarea { resize: vertical; min-height: 80px; }
 
 .project-item-name { font-weight: 600; font-size: 14px; }
 .project-item-sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.project-item--stacked { flex-direction: column; align-items: stretch; gap: 8px; }
+.project-item--stacked .project-item-info { width: 100%; }
+.project-item-actions { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
 
 .dashboard-main {
   flex: 1;
