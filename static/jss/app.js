@@ -614,6 +614,39 @@ function openExtractModal() {
   refreshInventorQaExtractDocs();
 }
 
+async function onInventorQaExtractFileChange() {
+  const input = document.getElementById('inventorQaExtractFileInput');
+  const label = document.getElementById('inventorQaExtractFileName');
+  const status = document.getElementById('inventorQaExtractStatus');
+  const file = input.files[0];
+  if (!file) {
+    label.textContent = 'Click to select Inventor_QA file (auto-uploads on selection)';
+    if (status) status.textContent = '';
+    return;
+  }
+  label.textContent = file.name;
+  if (!_patentId) {
+    if (status) status.innerHTML = '<span style="color:var(--danger)">Open a project first.</span>';
+    input.value = '';
+    return;
+  }
+  if (status) status.innerHTML = '<span class="loading-text"><span class="spinner"></span> Uploading…</span>';
+  try {
+    const form = new FormData(); form.append('file', file);
+    const res = await fetch('/api/patents/' + _patentId + '/inventor-qa/documents', { method: 'POST', body: form });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || ('Upload failed (' + res.status + ')'));
+    }
+    if (status) status.innerHTML = '<span style="color:var(--success)">✓ Uploaded "' + esc(file.name) + '"</span>';
+    input.value = '';
+    label.textContent = 'Click to select Inventor_QA file (auto-uploads on selection)';
+    await refreshInventorQaExtractDocs();
+  } catch (e) {
+    if (status) status.innerHTML = '<span style="color:var(--danger)">' + esc(e.message) + '</span>';
+  }
+}
+
 async function refreshInventorQaExtractDocs() {
   const box = document.getElementById('inventorQaExtractDocList');
   if (!_patentId || !box) { if (box) box.innerHTML = ''; return; }
@@ -635,19 +668,11 @@ async function refreshInventorQaExtractDocs() {
 async function startExtraction() {
   const bbf = document.getElementById('bbfFileInput').files[0];
   const rep = document.getElementById('reportFileInput').files[0];
-  const qaFile = document.getElementById('inventorQaExtractFileInput').files[0];
   if (!bbf || !rep) { alert('BBF and Report files are required.'); return; }
   const btn = document.getElementById('btnExtract');
   btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Extracting…';
   document.getElementById('extractStatus').innerHTML = '<span class="loading-text"><span class="spinner"></span> Running pipeline…</span>';
   try {
-    if (qaFile && _patentId) {
-      const qaForm = new FormData(); qaForm.append('file', qaFile);
-      try {
-        await fetch('/api/patents/' + _patentId + '/inventor-qa/documents', { method: 'POST', body: qaForm });
-        await refreshInventorQaExtractDocs();
-      } catch (_) {}
-    }
     const form = new FormData(); form.append('bbf', bbf); form.append('report', rep);
     await fetch('/api/pipeline/extract-elements', { method: 'POST', body: form });
     const poll = setInterval(async () => {
