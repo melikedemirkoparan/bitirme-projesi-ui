@@ -243,8 +243,9 @@
 
         <!-- Reference number -->
         <div class="form-section">
-          <label class="form-label" for="defReferenceNumber">Reference Number</label>
-          <input type="number" id="defReferenceNumber" min="0" step="1" placeholder="e.g. 12">
+          <label class="form-label" for="defReferenceNumber">Reference Number <span style="color:var(--accent)">*</span></label>
+          <input type="text" id="defReferenceNumber" required maxlength="10" pattern="(?=.*[A-Za-z0-9])[A-Za-z0-9'\-]{1,10}" placeholder="e.g. 5, 12, 5a, M, 12-A">
+          <p style="font-size:11px;color:var(--text-muted);margin-top:4px">Required. 1-10 chars: letters, digits, apostrophe, hyphen.</p>
         </div>
 
         <!-- Linked claims context — populated in edit mode -->
@@ -414,6 +415,54 @@
     </div>
   </div>
 
-  <script src="/static/jss/workspace.js"></script>
+  <!-- ═══════════════════════════════════════════════════════════
+       WORKSPACE DOCUMENT ASSISTANT — Floating button + right drawer
+       ═══════════════════════════════════════════════════════════ -->
+  <button class="assistant-fab" id="assistantFab" onclick="toggleAssistantDrawer(true)" title="Document Assistant">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+    </svg>
+    <span>Document Assistant</span>
+  </button>
+
+  <div class="assistant-overlay" id="assistantOverlay" onclick="toggleAssistantDrawer(false)"></div>
+
+  <aside class="assistant-drawer" id="assistantDrawer" aria-hidden="true">
+    <div class="assistant-drawer-header">
+      <div>
+        <h3>Document Assistant</h3>
+        <p>Offline drafting helper grounded in your project documents.</p>
+      </div>
+      <button class="modal-close" onclick="toggleAssistantDrawer(false)" aria-label="Close">&times;</button>
+    </div>
+
+    <div class="assistant-mode-selector" role="tablist">
+      <button class="assistant-mode-btn active" data-mode="P1" onclick="selectAssistantMode('P1')">Core Problem</button>
+      <button class="assistant-mode-btn" data-mode="P2" onclick="selectAssistantMode('P2')">Claim Structure</button>
+      <button class="assistant-mode-btn" data-mode="P3" onclick="selectAssistantMode('P3')">Element Lookup</button>
+    </div>
+
+    <div class="assistant-term-row" id="assistantTermRow" style="display:none;">
+      <label class="form-label" for="assistantTermInput">Element / term</label>
+      <input type="text" id="assistantTermInput" placeholder="e.g. locking nut, hub, support arm">
+    </div>
+
+    <div class="assistant-ask-row">
+      <button class="btn btn-primary" id="assistantAskBtn" onclick="askAssistant()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+          <line x1="22" y1="2" x2="11" y2="13"/>
+          <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+        </svg>
+        Ask
+      </button>
+      <span class="assistant-ask-hint" id="assistantAskHint"></span>
+    </div>
+
+    <div class="assistant-result" id="assistantResult">
+      <p class="ws-empty-msg">Pick a mode above and press Ask.</p>
+    </div>
+  </aside>
+
+  <script src="/static/jss/workspace.js?v=4"></script>
 </body>
 </html>

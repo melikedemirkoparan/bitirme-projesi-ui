@@ -25,6 +25,7 @@ def create_patent(db: Session, data: PatentCreate) -> Patent:
     patent = Patent(
         patent_name=data.patent_name,
         patent_owner=data.patent_owner,
+        domain=data.domain,
     )
     db.add(patent)
     # Flush to get patent_id before creating child records
@@ -66,6 +67,12 @@ def update_patent(db: Session, patent_id: int, data: PatentUpdate) -> Patent | N
         patent.patent_name = data.patent_name
     if data.patent_owner is not None:
         patent.patent_owner = data.patent_owner
+    if data.domain is not None:
+        patent.domain = data.domain
+    if data.invention_context is not None:
+        patent.invention_context = data.invention_context
+    if data.patent_draft is not None:
+        patent.patent_draft = data.patent_draft
     db.commit()
     db.refresh(patent)
     return patent

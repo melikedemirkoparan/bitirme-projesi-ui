@@ -43,9 +43,9 @@ Veritabanı verileri Docker volume'da saklanır, durdurup başlatsanız da kaybo
 | Backend | FastAPI (Python 3.12) |
 | Veritabanı | PostgreSQL 16 (Docker) |
 | ORM | SQLAlchemy 2.0 + Alembic |
-| Vektör Arama | FAISS (faiss-cpu) |
+| Vektör Arama | ChromaDB (persistent, cosine space) |
 | Embedding | intfloat/multilingual-e5-base (sentence-transformers) |
-| LLM | Mistral-7B via Colab (opsiyonel) veya akıllı fallback |
+| LLM | Lokal Ollama (varsayılan) veya Mistral-7B via Colab/ngrok (URL set edilirse) |
 | Frontend | Vanilla JS + CSS (dark theme) |
 | Container | Docker Compose |
 
@@ -114,19 +114,16 @@ Veritabanı verileri Docker volume'da saklanır, durdurup başlatsanız da kaybo
 ### 6. AI Tanım Önerisi (Detay)
 
 Tanım önerisi 3 aşamada çalışır:
-1. **RAG Fragment**: FAISS vektör araması ile benzer patent tanımlarından genel teknik tanım
-2. **BBF Fragment**: Yüklenen BBF dokümanından unsura özel konumsal/ilişkisel bilgi
-3. **Final Definition**: İki fragment'ın birleştirilmiş hali
+1. **Stage 1 — Functional**: 2-aşamalı Chroma retrieval (önce projenin **domain** alanı ile `description_title_en` koleksiyonundan top-5 distinct title; sonra element adı ile `definition_en` koleksiyonunda title-filtreli semantic arama) ile bulunan benzer tanımları stilistik referans olarak kullanır.
+2. **Stage 2 — Geometry**: Yapısal proje inputlarından (BBF / Research Report / Inventor Q&A) hedef elementin pozisyon/ilişki cümlesini çıkarır.
+3. **Stage 3 — Synthesis**: İki cümleyi `[geometry], [function], a [name] (refN)` şablonu ile birleştirir; deterministik adım, LLM kullanılmaz.
 
-### 7. Colab LLM Bağlantısı (Opsiyonel)
+### 7. LLM Backend (Lokal / Uzak)
 
-Daha kaliteli tanımlar için Google Colab'da Mistral-7B çalıştırabilirsiniz:
+İki seçenek var, anlık geçiş yapılabilir:
 
-1. Colab'da yeni notebook açın (Runtime → T4 GPU)
-2. LLM sunucu kodunu çalıştırın (ngrok ile dışarı açılır)
-3. **⚙ Settings** → LLM API URL'ye ngrok URL'sini yapıştırın
-
-LLM bağlı değilse akıllı fallback çalışır (FAISS'ten en iyi tanım + BBF'ten ilgili cümleler).
+- **Lokal (varsayılan)**: Ollama lokal makinede çalışır. Hiçbir ek ayar gerekmez; `OLLAMA_BASE_URL` ve `OLLAMA_MODEL` `.env`'den ayarlanır.
+- **Uzak (opsiyonel)**: Google Colab'da Mistral-7B → ngrok ile dışarı açılır → **⚙ Settings → LLM API URL** alanına ngrok URL'i yapıştırılır. URL set edildiği anda router uzaktaki endpoint'e yönlenir; URL temizlenirse otomatik lokala geri döner.
 
 ### 8. Draft Oluşturma
 - **📋 Assemble with Report**: Tüm element tanımlarını rapor formatında birleştirir
@@ -149,21 +146,23 @@ paten_draft_backend/
 │   ├── main.py                   # FastAPI uygulama giriş noktası
 │   ├── config.py                 # Uygulama ayarları
 │   ├── database.py               # SQLAlchemy bağlantısı
-│   ├── rag_engine.py             # FAISS RAG + LLM tanım üretimi
+│   ├── definition_pipeline.py    # 3-aşamalı definition üretim pipeline'ı
 │   ├── bbf_report_unsur_pipeline.py  # BBF/Report element çıkarma
+│   ├── generation/               # LLM client'ları (Ollama, remote, router)
+│   ├── retrieval/                # Chroma retrieval modülü (2-aşamalı)
+│   ├── ingestion/                # Excel → Chroma collection ingestion
 │   ├── models/                   # SQLAlchemy ORM modelleri
 │   ├── routes/                   # API endpoint'leri
 │   ├── schemas/                  # Pydantic şemaları
-│   ├── services/                 # İş mantığı servisleri
-│   └── ingestion/                # Veri yükleme modülleri
+│   └── services/                 # İş mantığı servisleri
 ├── static/
 │   ├── home.html                 # Ana sayfa (SPA)
 │   ├── cs/style.css              # Dark theme CSS
 │   └── jss/app.js                # Frontend JavaScript
 ├── scripts/
 │   └── start.sh                  # Docker başlangıç scripti
-└── data/                         # Excel dosyaları + FAISS cache
-    └── .cache/
+├── data/                         # Yüklenen Excel dosyaları
+└── storage/                      # ChromaDB persistent storage
 ```
 
 ---

@@ -5,7 +5,7 @@
 
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 
-_DEFAULT_MODEL = "all-MiniLM-L6-v2"
+_DEFAULT_MODEL = "intfloat/multilingual-e5-base"
 
 
 def get_embedding_function(model_name: str = _DEFAULT_MODEL):

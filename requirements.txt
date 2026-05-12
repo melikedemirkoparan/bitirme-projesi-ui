@@ -14,9 +14,9 @@ python-multipart==0.0.20
 pandas>=2.0
 openpyxl>=3.1
 
-# RAG — FAISS vector search
+# RAG — ChromaDB vector store + multilingual embedding
+chromadb>=0.5
 sentence-transformers>=3.0
-faiss-cpu>=1.9
 torch>=2.0
 
 # LLM fallback + translation

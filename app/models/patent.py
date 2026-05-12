@@ -12,6 +12,8 @@ class Patent(Base):
     patent_id: Mapped[int] = mapped_column(primary_key=True)
     patent_name: Mapped[str] = mapped_column(String(255))
     patent_owner: Mapped[str] = mapped_column(String(255))
+    domain: Mapped[str | None] = mapped_column(String(255), default=None)
+    invention_context: Mapped[str | None] = mapped_column(Text, default=None)
     patent_draft: Mapped[str | None] = mapped_column(Text, default=None)
     created_at: Mapped[datetime] = mapped_column(server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(server_default=func.now(), onupdate=func.now())

@@ -62,6 +62,10 @@ def build_collection(
     collection = client.get_or_create_collection(
         name=collection_name,
         embedding_function=embedding_fn,
+        # Cosine space so retrieval-side similarity = 1 - distance is in
+        # [0, 2] with 1.0 meaning identical direction. Default is l2,
+        # which makes thresholds harder to reason about across collections.
+        metadata={"hnsw:space": "cosine"},
     )
 
     documents: list[str] = []

@@ -36,3 +36,12 @@ uploads/
 
 # Logs
 *.log
+
+# Vector store (ChromaDB) — locally generated, 100+ MB
+storage/
+
+# Local RAG data (Excel inputs + caches) — recreate from upload UI
+data/
+
+# Claude Code agent state
+.claude/

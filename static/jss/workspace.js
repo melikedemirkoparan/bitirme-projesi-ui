@@ -831,19 +831,17 @@ function onDefinitionInput() {
 }
 
 async function aiSuggestDefinition() {
-  const elemName = document.getElementById('defElementName').value.trim();
-  if (!elemName) {
-    alert('Please enter an element name first.');
+  if (_elemDefMode !== 'edit' || !_elemDefId) {
+    alert('Save the element first, then click AI Suggest Definition.');
     return;
   }
+  const patentId = getPatentId();
 
-  // Check if RAG data is loaded
   let ragReady = false;
   try {
     const ragStatus = await api('/rag/data-status');
     ragReady = ragStatus.loaded;
   } catch (_) {}
-
   if (!ragReady) {
     alert('RAG data not loaded. Please upload the Excel data file first using "Upload Data".');
     return;
@@ -855,26 +853,19 @@ async function aiSuggestDefinition() {
   btn.disabled = true;
 
   try {
-    const result = await api('/rag/generate-definition', {
+    const result = await api('/patents/' + patentId + '/elements/' + _elemDefId + '/generate-definition?top_k=5', {
       method: 'POST',
-      body: JSON.stringify({
-        element_name: elemName,
-        context: '',
-        bbf_text: '',
-        top_k: 5,
-      }),
     });
 
-    // Fill the definition textarea with the result
-    if (result.final_definition) {
-      document.getElementById('defDefinitionText').value = result.final_definition;
+    const final = result.final_candidate || '';
+    if (final) {
+      document.getElementById('defDefinitionText').value = final;
       document.getElementById('elemDefStatus').innerHTML = _defStatusHtml('AI suggestion applied — unsaved');
+    } else {
+      document.getElementById('elemDefStatus').innerHTML = _defStatusHtml(result.message || 'No suggestion produced');
     }
 
-    // Show suggestions modal if available
-    if (result.retrieved_examples || result.rag_fragment || result.bbf_fragment) {
-      showAiSuggestionsModal(result);
-    }
+    showAiSuggestionsModal(result);
   } catch (e) {
     alert('AI generation failed: ' + e.message);
   } finally {
@@ -887,32 +878,35 @@ function showAiSuggestionsModal(result) {
   const modal = document.getElementById('aiSuggestionsModal');
   if (!modal) return;
 
-  const retrieved = result.retrieved_examples || [];
-  const ragFrag = result.rag_fragment || '';
-  const bbfFrag = result.bbf_fragment || '';
-  const finalDef = result.final_definition || '';
+  const s1 = (result.stage_outputs && result.stage_outputs.stage1_functional) || {};
+  const s2 = (result.stage_outputs && result.stage_outputs.stage2_geometry) || {};
+  const ret = result.rag_hits || [];
+  const finalDef = result.final_candidate || '';
+  const msg = result.message || '';
 
   const content = document.getElementById('aiSuggestionsContent');
   content.innerHTML = `
     <div class="suggestions-grid">
       <div class="suggestion-col">
-        <h5>RAG Fragment</h5>
-        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:12px">${esc(ragFrag)}</p>
-        <h5 style="margin-top:12px">Retrieved Examples (${retrieved.length})</h5>
-        ${retrieved.map(r => `
+        <h5>Stage 1 — Functional</h5>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">${esc(s1.functional_clause || '<em>empty</em>')}</p>
+        <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px">${esc(s1.evidence_note || '')}</p>
+        <h5 style="margin-top:12px">Retrieved (style ref)</h5>
+        ${ret.map(r => `
           <div class="suggestion-example" onclick="applySuggestion('${esc(r.definition_en).replace(/'/g, "\\'")}')" style="cursor:pointer;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;">
-            <strong style="font-size:12px;">${esc(r.element_name_en)}</strong>
+            <strong style="font-size:12px;">${esc(r.element_name_en)}</strong> · ${r.score}
             <span style="font-size:11px;display:block;color:var(--text-muted);margin-top:2px;">${esc((r.definition_en || '').substring(0, 150))}…</span>
-            <span style="font-size:10px;color:var(--text-muted);">Score: ${r.score}</span>
           </div>
         `).join('')}
       </div>
       <div class="suggestion-col">
-        <h5>BBF Fragment</h5>
-        <p style="font-size:12px;color:var(--text-secondary)">${esc(bbfFrag) || '<em>No BBF text provided</em>'}</p>
+        <h5>Stage 2 — Geometry</h5>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">${esc(s2.geometry_clause || '<em>empty</em>')}</p>
+        <p style="font-size:11px;color:var(--text-muted)">${esc(s2.evidence_note || '')}</p>
         <div style="margin-top:24px;">
-          <h5>Final Definition</h5>
-          <p style="font-size:13px;color:var(--text-primary);font-weight:500;padding:12px;background:var(--bg-tertiary);border-radius:6px;">${esc(finalDef)}</p>
+          <h5>Stage 3 — Final Candidate</h5>
+          <p style="font-size:13px;color:var(--text-primary);font-weight:500;padding:12px;background:var(--bg-tertiary);border-radius:6px;">${esc(finalDef || '<em>insufficient evidence</em>')}</p>
+          ${msg ? `<p style="font-size:11px;color:var(--accent);margin-top:6px">${esc(msg)}</p>` : ''}
         </div>
       </div>
     </div>
@@ -942,6 +936,8 @@ function clearDefinition() {
   document.getElementById('elemDefStatus').innerHTML = _defStatusHtml('Not saved yet');
 }
 
+const REF_NUMBER_PATTERN = /^(?=.*[A-Za-z0-9])[A-Za-z0-9'\-]{1,10}$/;
+
 async function submitElementDef() {
   const patentId = getPatentId();
   const name     = document.getElementById('defElementName').value.trim();
@@ -954,19 +950,20 @@ async function submitElementDef() {
     return;
   }
 
-  let referenceNumber = null;
-  if (refRaw) {
-    referenceNumber = parseInt(refRaw, 10);
-    if (Number.isNaN(referenceNumber) || referenceNumber < 0) {
-      alert('Reference Number must be a non-negative integer.');
-      document.getElementById('defReferenceNumber').focus();
-      return;
-    }
+  if (!refRaw) {
+    alert('Reference Number is required.');
+    document.getElementById('defReferenceNumber').focus();
+    return;
+  }
+  if (!REF_NUMBER_PATTERN.test(refRaw)) {
+    alert('Reference Number must be 1-10 chars, letters/digits/apostrophe/hyphen only (e.g. 5, 12, 5a, M, 12-A).');
+    document.getElementById('defReferenceNumber').focus();
+    return;
   }
 
   const payload = {
     element_name:     name,
-    reference_number: referenceNumber,
+    reference_number: refRaw,
     definition_text:  defText || null,
   };
 
@@ -1172,3 +1169,198 @@ document.addEventListener('DOMContentLoaded', () => {
   loadIngestionStatus();
   updateQueueHint();
 });
+
+
+// ═══════════════════════════════════════════════════════════════
+// WORKSPACE DOCUMENT ASSISTANT (offline_qa_module)
+// ═══════════════════════════════════════════════════════════════
+
+let assistantMode = 'P1';
+let assistantBusy = false;
+
+function _esc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function toggleAssistantDrawer(open) {
+  const drawer = document.getElementById('assistantDrawer');
+  const overlay = document.getElementById('assistantOverlay');
+  if (!drawer) return;
+  const isOpen = open === undefined ? !drawer.classList.contains('open') : !!open;
+  drawer.classList.toggle('open', isOpen);
+  overlay.classList.toggle('open', isOpen);
+  drawer.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+}
+
+function selectAssistantMode(mode) {
+  assistantMode = mode;
+  document.querySelectorAll('.assistant-mode-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.mode === mode);
+  });
+  document.getElementById('assistantTermRow').style.display = (mode === 'P3') ? 'block' : 'none';
+}
+
+async function askAssistant() {
+  if (assistantBusy) return;
+
+  const patentId = getPatentId();
+  if (!patentId) {
+    _renderAssistantError('No active patent project.');
+    return;
+  }
+
+  const body = { pattern_id: assistantMode };
+  if (assistantMode === 'P3') {
+    const term = (document.getElementById('assistantTermInput').value || '').trim();
+    if (!term) {
+      _renderAssistantError('Please enter a term to look up.');
+      return;
+    }
+    body.term = term;
+  }
+
+  _setAssistantBusy(true);
+  try {
+    const data = await api('/patents/' + patentId + '/assistant/ask', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    _renderAssistantResult(data);
+  } catch (err) {
+    _renderAssistantError(err && err.message ? err.message : 'Assistant call failed.');
+  } finally {
+    _setAssistantBusy(false);
+  }
+}
+
+function _setAssistantBusy(busy) {
+  assistantBusy = busy;
+  const btn = document.getElementById('assistantAskBtn');
+  const hint = document.getElementById('assistantAskHint');
+  if (btn) btn.disabled = busy;
+  if (hint) hint.textContent = busy ? 'Thinking…' : '';
+  if (busy) {
+    document.getElementById('assistantResult').innerHTML =
+      '<p class="ws-empty-msg">Running model… this may take a few seconds.</p>';
+  }
+}
+
+function _renderAssistantError(msg) {
+  document.getElementById('assistantResult').innerHTML =
+    '<div class="assistant-insufficient">' + _esc(msg) + '</div>';
+}
+
+function _supportBadge(level) {
+  const label = level === 'explicit' ? 'Explicitly Stated'
+              : level === 'inferred' ? 'Inferred'
+              : 'Insufficient';
+  return '<span class="assistant-support-badge support-' + _esc(level) + '">' + label + '</span>';
+}
+
+function _renderAssistantResult(data) {
+  const root = document.getElementById('assistantResult');
+  if (!data || !data.pattern_id) {
+    root.innerHTML = '<div class="assistant-insufficient">Empty response.</div>';
+    return;
+  }
+
+  const parts = [];
+  const title = data.title || data.pattern_id;
+  parts.push('<div class="assistant-result-header">');
+  parts.push('<h4>' + _esc(title) + '</h4>');
+  parts.push(_supportBadge(data.support_level));
+  parts.push('</div>');
+
+  if (data.support_level === 'insufficient') {
+    parts.push('<div class="assistant-insufficient">' +
+      _esc(data.insufficient_message || data.answer || 'Not enough information in the source documents.') +
+      '</div>');
+    root.innerHTML = parts.join('');
+    return;
+  }
+
+  if (data.answer) {
+    parts.push('<div class="assistant-answer-block">' + _esc(data.answer).replace(/\n/g, '<br>') + '</div>');
+  }
+
+  if (data.pattern_id === 'P2' && data.claim_structure) {
+    parts.push(_renderClaimStructure(data.claim_structure));
+  }
+
+  if (Array.isArray(data.evidence) && data.evidence.length) {
+    parts.push(_renderEvidence(data.evidence, data.pattern_id));
+  }
+
+  root.innerHTML = parts.join('');
+}
+
+function _renderClaimStructure(cs) {
+  const out = ['<div class="assistant-cs-section">'];
+
+  if (Array.isArray(cs.independent_candidates) && cs.independent_candidates.length) {
+    out.push('<h5>Independent claim candidates</h5>');
+    cs.independent_candidates.forEach(c => out.push(_renderCsCard(c)));
+  }
+  if (Array.isArray(cs.dependent_candidates) && cs.dependent_candidates.length) {
+    out.push('<h5>Dependent claim candidates</h5>');
+    cs.dependent_candidates.forEach(c => out.push(_renderCsCard(c, true)));
+  }
+  if (Array.isArray(cs.cautions) && cs.cautions.length) {
+    out.push('<h5>Drafting cautions</h5>');
+    out.push('<ul class="assistant-cs-cautions">');
+    cs.cautions.forEach(c => out.push('<li>' + _esc(c) + '</li>'));
+    out.push('</ul>');
+  }
+
+  out.push('</div>');
+  return out.join('');
+}
+
+function _renderCsCard(c, isDependent) {
+  const features = (c.features || []).map(f => '<li>' + _esc(f) + '</li>').join('');
+  const dep = isDependent && c.depends_on
+    ? '<div class="assistant-cs-dep">depends on: ' + _esc(c.depends_on) + '</div>' : '';
+  const sup = c.support_level
+    ? '<div class="assistant-cs-support">' + _supportBadge(c.support_level) +
+      (c.support_note ? ' <span class="assistant-cs-note">' + _esc(c.support_note) + '</span>' : '') +
+      '</div>' : '';
+  return '<div class="assistant-cs-card">' +
+    '<div class="assistant-cs-label">' + _esc(c.label || '') + '</div>' +
+    dep +
+    (features ? '<ul class="assistant-cs-features">' + features + '</ul>' : '') +
+    (c.reason ? '<div class="assistant-cs-reason">' + _esc(c.reason) + '</div>' : '') +
+    sup +
+    '</div>';
+}
+
+function _renderEvidence(evidence, mode) {
+  const out = ['<div class="assistant-evidence-section">',
+              '<h5>Evidence</h5>'];
+  evidence.forEach(ev => {
+    const note = ev.usefulness_note
+      ? '<div class="assistant-evidence-note">' + _esc(ev.usefulness_note) + '</div>' : '';
+    const meta = '<div class="assistant-evidence-meta">' +
+      _esc(ev.evidence_id || '') + ' · ' +
+      _esc(ev.document_type || '') + ' · ' +
+      _esc(ev.field || '') + '</div>';
+    let excerpt = _esc(ev.excerpt || '').replace(/\n/g, '<br>');
+    if (mode === 'P3' && ev.match_term) {
+      excerpt = _highlightTerm(excerpt, ev.match_term);
+    }
+    out.push('<div class="assistant-evidence-card">' + meta + note +
+             '<div class="assistant-evidence-excerpt">' + excerpt + '</div></div>');
+  });
+  out.push('</div>');
+  return out.join('');
+}
+
+function _highlightTerm(escapedHtml, term) {
+  if (!term) return escapedHtml;
+  const safeTerm = _esc(term).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!safeTerm) return escapedHtml;
+  const re = new RegExp('(' + safeTerm + ')', 'gi');
+  return escapedHtml.replace(re, '<span class="assistant-highlight">$1</span>');
+}

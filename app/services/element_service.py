@@ -26,11 +26,33 @@ def get_element_for_patent(db: Session, patent_id: int, element_id: int) -> Elem
     )
 
 
+def _next_reference_number(db: Session, patent_id: int) -> str:
+    """Pick the next sequential numeric reference_number for this patent.
+
+    Scans existing reference_numbers, finds the highest purely-numeric one,
+    and returns max+1 as a string. Non-numeric refs (e.g. user-typed "A1")
+    are ignored. Falls back to "1" when no numeric refs exist yet.
+    """
+    existing = (
+        db.query(Element.reference_number)
+        .filter(Element.patent_id == patent_id)
+        .all()
+    )
+    max_n = 0
+    for (ref,) in existing:
+        if ref and ref.isdigit():
+            n = int(ref)
+            if n > max_n:
+                max_n = n
+    return str(max_n + 1)
+
+
 def create_element(db: Session, patent_id: int, data: ElementCreate) -> Element:
+    reference_number = data.reference_number or _next_reference_number(db, patent_id)
     element = Element(
         patent_id=patent_id,
         element_name=data.element_name,
-        reference_number=data.reference_number,
+        reference_number=reference_number,
         definition_text=data.definition_text,
     )
     db.add(element)
@@ -46,9 +68,13 @@ def update_element(db: Session, patent_id: int, element_id: int, data: ElementUp
 
     # Use model_fields_set to apply only fields that were explicitly included in the request.
     # This distinguishes between an omitted field (leave unchanged) and an explicitly sent
-    # null (allowed to clear nullable fields like reference_number and definition_text).
+    # null (allowed to clear nullable fields like definition_text).
     for field in data.model_fields_set:
-        setattr(element, field, getattr(data, field))
+        value = getattr(data, field)
+        # reference_number is NOT NULL in the DB; reject explicit nulls at the boundary.
+        if field == "reference_number" and value is None:
+            raise ValueError("reference_number cannot be set to null")
+        setattr(element, field, value)
 
     db.commit()
     db.refresh(element)

@@ -30,6 +30,7 @@ class InventorQACreate(BaseModel):
 class PatentCreate(BaseModel):
     patent_name: str
     patent_owner: str
+    domain: str | None = None
     invention_disclosure: InventionDisclosureCreate | None = None
     research_report: ResearchReportCreate | None = None
     inventor_qna: InventorQACreate | None = None
@@ -38,6 +39,9 @@ class PatentCreate(BaseModel):
 class PatentUpdate(BaseModel):
     patent_name: str | None = None
     patent_owner: str | None = None
+    domain: str | None = None
+    invention_context: str | None = None
+    patent_draft: str | None = None
 
 
 # ── Response schemas ────────────────────────────────────────────
@@ -46,6 +50,7 @@ class PatentSummary(BaseModel):
     patent_id: int
     patent_name: str
     patent_owner: str
+    domain: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -55,6 +60,8 @@ class PatentDetail(BaseModel):
     patent_id: int
     patent_name: str
     patent_owner: str
+    domain: str | None = None
+    invention_context: str | None = None
     patent_draft: str | None
     created_at: datetime
     updated_at: datetime

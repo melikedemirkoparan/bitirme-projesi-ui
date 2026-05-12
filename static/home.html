@@ -48,6 +48,7 @@
     </div>
     <div class="dashboard-main">
       <div class="dashboard-hero">
+        <img class="dashboard-brand-logo" src="/static/img/tusas-logo.png" alt="TUSAŞ">
         <h1>PATENT <span>DRAFTING</span> TOOL</h1>
         <div class="dashboard-cards">
           <div class="dashboard-card"><h4>Claims</h4><p>Manage nested element trees with clarity and precision.</p></div>
@@ -156,12 +157,13 @@
     <div class="modal-body">
       <div class="form-section"><label class="form-label">Project Name *</label><input type="text" id="newProjectName" placeholder="e.g. Antenna assembly for aircraft"></div>
       <div class="form-section"><label class="form-label">Patent Owner *</label><input type="text" id="newProjectOwner" placeholder="e.g. TUSAS"></div>
+      <div class="form-section"><label class="form-label">Domain</label><input type="text" id="newProjectDomain" placeholder="e.g. aircraft sway brace mechanisms"><p style="font-size:11px;color:var(--text-secondary);margin-top:4px">Free-text technical area. Used by AI Suggest Definition to filter retrieval to similar prior patents.</p></div>
     </div>
     <div class="modal-footer"><button class="btn" onclick="closeModal('newProjectModal')">Cancel</button><button class="btn btn-primary" onclick="submitNewProject()">Create</button></div>
   </div>
 </div>
 
-<!-- ═══════════ MODAL: Patent Inputs (Buluşçu ile Yazışmalar) ═══════════ -->
+<!-- ═══════════ MODAL: Patent Inputs (Inventor Correspondence) ═══════════ -->
 <div id="patentInputsModal" class="modal-overlay">
   <div class="modal" style="max-width:720px">
     <div class="modal-header">
@@ -172,10 +174,79 @@
       <button class="modal-close" onclick="closeModal('patentInputsModal')">×</button>
     </div>
     <div class="modal-body">
+
+      <!-- ── Card 1: Invention Disclosure (BBF) ── -->
       <div class="patent-input-card">
         <div class="patent-input-card-header">
           <div>
-            <h4>Buluşçu ile Yazışmalar <span class="patent-input-card-tag">(Inventor_QA)</span></h4>
+            <h4>Invention Disclosure Form <span class="patent-input-card-tag">(BBF)</span></h4>
+            <p>Structured invention disclosure fields. Paste the relevant text for each section.</p>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <label class="form-label">Prior Art &amp; Problems</label>
+          <textarea id="idfPriorArt" rows="5"
+                    placeholder="Shortcomings of the prior art and problems solved by the invention…"></textarea>
+        </div>
+        <div class="form-section">
+          <label class="form-label">Closest Prior Patents</label>
+          <textarea id="idfClosestPriorPatents" rows="4"
+                    placeholder="Closest prior patent documents (list)…"></textarea>
+        </div>
+        <div class="form-section">
+          <label class="form-label">Novel Features</label>
+          <textarea id="idfNovelFeatures" rows="5"
+                    placeholder="Novel features of the invention (Element 1, Element 2, …)"></textarea>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+          <span id="idfSaveStatus" style="font-size:11px;color:var(--text-muted)"></span>
+          <button class="btn btn-sm btn-primary" onclick="saveInventionDisclosure()">Save BBF</button>
+        </div>
+      </div>
+
+      <!-- ── Card 2: Research Report ── -->
+      <div class="patent-input-card">
+        <div class="patent-input-card-header">
+          <div>
+            <h4>Research Report <span class="patent-input-card-tag">(Research Report)</span></h4>
+            <p>Structured prior-art search report fields. Paste the relevant text for each section.</p>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <label class="form-label">Executive Summary</label>
+          <textarea id="rrExecutiveSummary" rows="5"
+                    placeholder="Report summary, novelty / inventive step assessment…"></textarea>
+        </div>
+        <div class="form-section">
+          <label class="form-label">Search Strategy</label>
+          <textarea id="rrSearchStrategy" rows="4"
+                    placeholder="Search strategy and databases used…"></textarea>
+        </div>
+        <div class="form-section">
+          <label class="form-label">Classification &amp; Keywords</label>
+          <textarea id="rrClassificationKeywords" rows="4"
+                    placeholder="IPC/CPC classifications and keywords…"></textarea>
+        </div>
+        <div class="form-section">
+          <label class="form-label">Element Patent Analysis</label>
+          <textarea id="rrElementPatentAnalysis" rows="6"
+                    placeholder="Element-by-element comparison: Element ↔ cited patent, teaching/difference…"></textarea>
+        </div>
+
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+          <span id="rrSaveStatus" style="font-size:11px;color:var(--text-muted)"></span>
+          <button class="btn btn-sm btn-primary" onclick="saveResearchReport()">Save Research Report</button>
+        </div>
+      </div>
+
+      <!-- ── Card 3: Inventor Q&A ── -->
+      <div class="patent-input-card">
+        <div class="patent-input-card-header">
+          <div>
+            <h4>Inventor Correspondence <span class="patent-input-card-tag">(Inventor_QA)</span></h4>
             <p>Inventor questions, answers, and clarification notes. You can also attach related documents.</p>
           </div>
         </div>
@@ -183,7 +254,7 @@
         <div class="form-section">
           <label class="form-label">Questions &amp; Answers</label>
           <textarea id="inventorQaText" rows="8"
-                    placeholder="Inventor ile yapılan görüşmelerden gelen soru-cevap ve açıklama notlarını buraya girin…"></textarea>
+                    placeholder="Enter Q&A and clarification notes from inventor interviews here…"></textarea>
         </div>
 
         <div class="form-section">
@@ -203,11 +274,16 @@
             <p class="ws-empty-msg" style="margin:6px 0">No documents uploaded yet.</p>
           </div>
         </div>
+
+        <div style="display:flex;align-items:center;justify-content:flex-end;gap:8px">
+          <span id="inventorQaSaveStatus" style="font-size:11px;color:var(--text-muted)"></span>
+          <button class="btn btn-sm btn-primary" onclick="saveInventorQaText()">Save Q&amp;A Text</button>
+        </div>
       </div>
+
     </div>
     <div class="modal-footer">
       <button class="btn" onclick="closeModal('patentInputsModal')">Close</button>
-      <button class="btn btn-primary" onclick="saveInventorQaText()">Save Q&amp;A Text</button>
     </div>
   </div>
 </div>
@@ -219,6 +295,7 @@
     <div class="modal-body">
       <div class="form-section"><label class="form-label">Project Name *</label><input type="text" id="editProjectName"></div>
       <div class="form-section"><label class="form-label">Patent Owner *</label><input type="text" id="editProjectOwner"></div>
+      <div class="form-section"><label class="form-label">Domain</label><input type="text" id="editProjectDomain" placeholder="e.g. aircraft sway brace mechanisms"></div>
     </div>
     <div class="modal-footer"><button class="btn" onclick="closeModal('editProjectModal')">Cancel</button><button class="btn btn-primary" onclick="submitEditProject()">Save</button></div>
   </div>
@@ -283,7 +360,7 @@
         <span id="elemIdBadge" class="tag tag-blue" style="font-size:10px"></span>
       </div>
       <div class="form-section"><label class="form-label">Element Name *</label><input type="text" id="defElemName" placeholder="e.g. Turbine Blade"></div>
-      <div class="form-section"><label class="form-label">Reference Number</label><input type="number" id="defElemRef" min="0" step="1" placeholder="e.g. 12" style="max-width:160px"></div>
+      <div class="form-section"><label class="form-label">Reference Number <span style="color:var(--accent)">*</span></label><input type="text" id="defElemRef" required maxlength="10" pattern="(?=.*[A-Za-z0-9])[A-Za-z0-9'\-]{1,10}" placeholder="e.g. 5, 12, 5a, M, 12-A" style="max-width:160px"><p style="font-size:11px;color:var(--text-muted);margin-top:4px">Required. 1-10 chars: letters, digits, apostrophe, hyphen.</p></div>
       <div class="form-section"><label class="form-label">Linked Claims</label><div id="linkedClaimsList"><p style="font-size:12px;color:var(--text-muted)">No linked claims yet.</p></div></div>
       <div style="border-top:1px solid var(--border);margin:16px 0"></div>
       <div class="elem-def-toolbar">
@@ -336,15 +413,20 @@
     <div class="modal-header"><div><h3>⚡ Extract Elements from BBF + Report</h3><p>Upload documents to automatically extract patent elements.</p></div><button class="modal-close" onclick="closeModal('extractModal')">×</button></div>
     <div class="modal-body">
       <label class="form-label">BBF Document</label>
-      <div class="upload-zone" onclick="document.getElementById('bbfFileInput').click()" style="padding:20px;margin-bottom:16px">
-        <p id="bbfFileName" style="font-size:12px">Click to select BBF file</p>
-        <input id="bbfFileInput" type="file" accept=".docx,.pdf,.txt" style="display:none" onchange="document.getElementById('bbfFileName').textContent=this.files[0]?.name||'Click to select BBF file'">
+      <div class="upload-zone" onclick="document.getElementById('bbfFileInput').click()" style="padding:20px;margin-bottom:4px">
+        <p id="bbfFileName" style="font-size:12px">Click to select BBF file (auto-uploads on selection)</p>
+        <input id="bbfFileInput" type="file" accept=".docx,.pdf,.txt" style="display:none" onchange="onBbfExtractFileChange()">
       </div>
+      <div id="bbfExtractStatus" style="font-size:11px;color:var(--text-muted);margin-bottom:8px;min-height:14px"></div>
+      <div id="bbfExtractDocList" class="patent-input-doc-list" style="margin-bottom:12px"></div>
+
       <label class="form-label">Report Document</label>
-      <div class="upload-zone" onclick="document.getElementById('reportFileInput').click()" style="padding:20px;margin-bottom:16px">
-        <p id="reportFileName" style="font-size:12px">Click to select Report file</p>
-        <input id="reportFileInput" type="file" accept=".docx,.pdf,.txt" style="display:none" onchange="document.getElementById('reportFileName').textContent=this.files[0]?.name||'Click to select Report file'">
+      <div class="upload-zone" onclick="document.getElementById('reportFileInput').click()" style="padding:20px;margin-bottom:4px">
+        <p id="reportFileName" style="font-size:12px">Click to select Report file (auto-uploads on selection)</p>
+        <input id="reportFileInput" type="file" accept=".docx,.pdf,.txt" style="display:none" onchange="onReportExtractFileChange()">
       </div>
+      <div id="reportExtractStatus" style="font-size:11px;color:var(--text-muted);margin-bottom:8px;min-height:14px"></div>
+      <div id="reportExtractDocList" class="patent-input-doc-list" style="margin-bottom:12px"></div>
       <label class="form-label">Buluşçu ile Yazışmalar <span style="color:var(--accent);font-weight:500">(Inventor_QA)</span> <span style="color:var(--text-muted);font-weight:400">— optional</span></label>
       <div class="upload-zone" onclick="document.getElementById('inventorQaExtractFileInput').click()" style="padding:20px;margin-bottom:4px">
         <p id="inventorQaExtractFileName" style="font-size:12px">Click to select Inventor_QA file (auto-uploads on selection)</p>
@@ -376,6 +458,54 @@
   </div>
 </div>
 
-<script src="/static/jss/app.js?v=5"></script>
+<!-- ═══════════════════════════════════════════════════════════
+     WORKSPACE DOCUMENT ASSISTANT — Floating button + right drawer
+     ═══════════════════════════════════════════════════════════ -->
+<button class="assistant-fab" id="assistantFab" onclick="toggleAssistantDrawer(true)" title="Document Assistant">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+  </svg>
+  <span>Document Assistant</span>
+</button>
+
+<div class="assistant-overlay" id="assistantOverlay" onclick="toggleAssistantDrawer(false)"></div>
+
+<aside class="assistant-drawer" id="assistantDrawer" aria-hidden="true">
+  <div class="assistant-drawer-header">
+    <div>
+      <h3>Document Assistant</h3>
+      <p>Offline drafting helper grounded in your project documents.</p>
+    </div>
+    <button class="modal-close" onclick="toggleAssistantDrawer(false)" aria-label="Close">&times;</button>
+  </div>
+
+  <div class="assistant-mode-selector" role="tablist">
+    <button class="assistant-mode-btn active" data-mode="P1" onclick="selectAssistantMode('P1')">Core Problem</button>
+    <button class="assistant-mode-btn" data-mode="P2" onclick="selectAssistantMode('P2')">Claim Structure</button>
+    <button class="assistant-mode-btn" data-mode="P3" onclick="selectAssistantMode('P3')">Element Lookup</button>
+  </div>
+
+  <div class="assistant-term-row" id="assistantTermRow" style="display:none;">
+    <label class="form-label" for="assistantTermInput">Element / term</label>
+    <input type="text" id="assistantTermInput" placeholder="e.g. locking nut, hub, support arm">
+  </div>
+
+  <div class="assistant-ask-row">
+    <button class="btn btn-primary" id="assistantAskBtn" onclick="askAssistant()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13">
+        <line x1="22" y1="2" x2="11" y2="13"/>
+        <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+      </svg>
+      Ask
+    </button>
+    <span class="assistant-ask-hint" id="assistantAskHint"></span>
+  </div>
+
+  <div class="assistant-result" id="assistantResult">
+    <p class="ws-empty-msg">Pick a mode above and press Ask.</p>
+  </div>
+</aside>
+
+<script src="/static/jss/app.js?v=9"></script>
 </body>
 </html>

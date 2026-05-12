@@ -1,648 +1,582 @@
 # Definition Generator Specification
 
 ## Purpose
-This module is responsible for generating patent-style element definitions from structured project inputs and retrieval-supported evidence.
+This module generates a **single patent-style definition candidate** for a target element, using a strictly staged pipeline that separates *what the part does* (function) from *where and how it sits* (geometry), and only fuses them in a final synthesis step.
 
-The goal is not to produce a definition in one uncontrolled step.
+The generator is designed for **small offline LLMs (7B–14B class)**. The architecture compensates for limited model capacity by:
 
-Instead, the generator should use a staged architecture so that:
-- retrieval evidence is prepared first
-- functional candidates are generated separately
-- geometry / relation candidates are generated separately
-- final candidate definitions are produced only after both sides are analyzed
-
-This design is intended to improve:
-- grounding
-- modularity
-- interpretability
-- offline local-model reliability
-- replaceability of submodules over time
+- decomposing reasoning into narrow, single-purpose stages
+- restricting each stage to a clearly bounded I/O contract
+- forbidding free-form speculation
+- treating retrieval evidence as **stylistic reference only**, never as ground truth
+- moving deterministic operations (reference number injection, template assembly checks) out of the LLM and into code
 
 ---
 
 ## High-level architecture
-The definition generation workflow is divided into four parts:
 
-1. **Retrieval / RAG preparation**
-2. **Functional candidate generation**
-3. **Geometry / relation candidate generation**
-4. **Final definition generation**
+The pipeline has exactly **three stages**:
 
-Each stage must use structured inputs and produce structured outputs.
+| Stage | Name              | Produces                                                  | Uses RAG? |
+|-------|-------------------|-----------------------------------------------------------|-----------|
+| 1     | Functional        | Functional definition fragment (function only)            | Yes       |
+| 2     | Geometry/Relation | Geometry/positional fragment (relations only)             | No        |
+| 3     | Synthesis         | One final candidate definition + reference-number inject  | No        |
 
-Input/output contracts are important.
-The system should validate that the expected structure is present before sending data from one stage to the next.
+Each stage has:
+- a strict input contract
+- a strict output contract
+- a prompt that pins the model to a single bounded task
+- a deterministic fallback when the LLM output is malformed or empty
 
----
-
-## Core generation idea
-The final definition should be generated from a combination of:
-- structured invention/project inputs
-- retrieval-supported patent evidence
-- function candidates
-- geometry / relation candidates
-
-The generator should aim to produce multiple candidate definitions, not just one.
-
-For the initial version, the final stage should produce:
-- **3 candidate definitions**
-- strongest candidate first
-
-These candidate definitions are intended to be shown in the modal so the user can choose one.
+The output of Stage 3 is **a single candidate definition** — not multiple variants.
 
 ---
 
-## Stage 1 — Retrieval / RAG preparation
+## Shared inputs (built once, reused across stages)
 
-### Purpose
-This stage prepares retrieval-supported evidence before function generation begins.
+Before the pipeline runs, the orchestrator assembles a single normalized context object:
 
-Its job is to:
-- build a semantic context query from the patent's known elements
-- search the `all_elements_context_en` collection
-- keep only strong matches above a threshold
-- use those context matches to narrow the candidate scope
-- then search `definition_en` for the target element within that filtered scope
-
-This stage is evidence preparation, not final definition generation.
-
----
-
-### Input
-This stage should receive:
-- target element name
-- current patent element list
-- access to vector collections:
-  - `all_elements_context_en`
-  - `definition_en`
-
-The current patent element list may look like:
-- `body(5)`
-- `table(8)`
-- `sensor(3)`
-- `control unit(10)`
-
-The retrieval query should be built from the known element names, not from the target element alone.
-
----
-
-### Retrieval flow
-1. Build a context query from the patent's known elements  
-   Example:
-   - `body, table, heat source assembly, sensor, control unit, magnetic sputtering device`
-
-2. Run semantic search on `all_elements_context_en`
-
-3. Apply threshold filtering
-
-4. Keep top relevant context matches  
-   Suggested initial setting:
-   - top 3 matches above threshold
-
-5. Use those matches to narrow the candidate pool for the `definition_en` collection
-
-6. Run semantic retrieval for the target element over the filtered `definition_en` subset
-
----
-
-### Retrieval narrowing rule
-The system should **not** search `definition_en` globally first.
-
-The intended retrieval order is:
-
-1. build a context query from the patent's known elements
-2. search `all_elements_context_en`
-3. keep top threshold-qualified context results
-4. use those results to filter the candidate scope
-5. then search `definition_en` for the target element within that filtered scope
-6. send the resulting definition candidates to the functional generation stage
-
-This narrowing step is a core design principle.
-
----
-
-### Output
-This stage should output structured retrieval evidence.
-
-#### Output contract
-If sufficient candidates are found:
-```json
-{
-  "target_element": "body",
-  "context_matches": [...],
-  "definition_matches": [...]
-}
 ```
-
-If sufficient candidates are not found, return a controlled result instead of noisy weak evidence.
-
-Example insufficient-result output
-
-```json
-{
-  "target_element": "body",
-  "context_matches": [],
-  "definition_matches": [],
-  "message": "No sufficient definition candidates found"
-}
-```
-
-This stage should not hallucinate fallback matches.
-Weak or irrelevant retrieval should be rejected.
-
----
-
-## Stage 2 — Functional candidate generation
-
-### Purpose
-This stage generates candidate functional interpretations for the target element.
-
-Its job is to infer:
-- what the target element functionally does
-- what technical role it plays in the invention
-- whether similar prior definitions can provide useful pattern/style support
-
-This stage focuses on function, not geometry.
-
----
-
-### Input
-This stage should receive structured project evidence such as:
-- `Invention_disclosure.prior_art_and_problems`
-- `Invention_disclosure.novel_features`
-- `Research_report.executive_summary`
-- `Inventor_QA.questions_and_answers`
-- current patent element list
-- retrieval outputs from Stage 1
-
-Before prompting the local model, these inputs should be:
-- trimmed
-- cleaned
-- separated into structured sections
-- clearly labeled
-
-The model should not receive one large unstructured text dump.
-
----
-
-### Functional generation rule
-The local model should first be told:
-- what system it is operating in
-- what the task is
-- that the goal is to contribute toward a patent-style definition with a `[geometry/relation] + [function]` structure
-- that this stage is only responsible for the functional side
-
-Then it should:
-1. inspect the invention/project inputs
-2. understand the likely function of the target component
-3. inspect RAG-retrieved similar definitions
-4. use them only if they are actually relevant in function and style
-
----
-
-### Critical rule for RAG use
-RAG-retrieved definitions must be treated as optional functional/style support only.
-
-The model must not rely on RAG if:
-- the retrieval is contextually irrelevant
-- the retrieved result is about the wrong kind of component
-- the retrieved result has a high score but does not match the current function candidate
-- the retrieved definitions belong to unrelated structures or systems
-
-If retrieval evidence is not relevant, the model should ignore it.
-
----
-
-### Functional output rule
-This stage should output:
-- 3 or 4 functional candidates
-- ranked strongest first
-- each labeled with confidence
-
-Allowed confidence labels:
-- `high`
-- `medium`
-- `low`
-
-Example output shape
-
-```json
-{
-  "target_element": "body",
-  "functional_candidates": [
-    {
-      "candidate_text": "a structural component configured to support and carry relevant system parts",
-      "confidence": "high",
-      "evidence_note": "Supported by prior art and executive summary"
-    },
-    {
-      "candidate_text": "a housing component adapted to position and support optical subsystems",
-      "confidence": "medium",
-      "evidence_note": "Supported by invention disclosure and partial retrieval similarity"
-    },
-    {
-      "candidate_text": "a carrier component enabling system-level arrangement of optical units",
-      "confidence": "low",
-      "evidence_note": "Weak support, partly inferred"
-    }
+PipelineContext {
+  target_element: { name: str, reference_number: int | null },
+  related_elements: [ { name: str, reference_number: int | null }, ... ],
+  invention_disclosure: {
+    prior_art_and_problems: str,
+    closest_prior_patents: str,
+    novel_features: str
+  },
+  research_report: {
+    executive_summary: str,
+    search_strategy: str,
+    classification_and_keywords: str,
+    element_patent_analysis: str
+  },
+  inventor_qa: {
+    questions_and_answers: str
+  },
+  rag_hits: [
+    { element_name_en: str, definition_en: str, title_en: str, context_en: str, score: float },
+    ...
   ]
 }
 ```
 
-### Important functional restriction
-The functional stage must not include other elements’ reference numbers such as `(3)`, `(4)`, `(8)` inside the candidate text.
+`rag_hits` are produced by a **2-stage ChromaDB retrieval** (`app/retrieval/chroma_retrieval.py`):
 
-This stage is about the target element’s own function.
-It should not leak external reference numbering into the functional candidate text.
+- **Stage A — domain → titles.** The patent's free-text `domain` field is semantically searched against the `patent_description_title_en` collection. Up to 5 **distinct** titles whose cosine similarity is above the threshold (`SIMILARITY_THRESHOLD`, default 0.55) are kept as a filter set. If `domain` is empty, this stage is skipped.
+- **Stage B — element_name → filtered definitions.** The target element name is semantically searched against the `patent_definition_en` collection, restricted by `where description_title_en $in [Stage A titles]`. Results are returned as `rag_hits`.
 
----
+If domain is provided but Stage A finds nothing above threshold, Stage B falls back to an unfiltered search so a novel domain term does not kill the suggestion entirely.
 
-## Stage 3 — Geometry / relation candidate generation
+`rag_hits` are passed *only* into Stage 1 and only as stylistic reference — never as factual content.
 
-### Purpose
-This stage generates candidate geometry / relation interpretations for the target element.
-
-Its job is to infer:
-- where the component is located
-- how it is positioned relative to other parts
-- whether it extends, surrounds, supports, rotates, is removably attached, etc.
-- which standard geometric / positional expression patterns apply
-
-This stage focuses on geometry, structure, and inter-part relations, not function.
+All free-text fields must be **trimmed and bounded** before being inserted into prompts (suggested per-field cap: ~1500 chars; per-prompt cap: ~6000 chars). If a field is empty, the orchestrator passes the literal token `(none)` so the model never sees an unlabeled blank.
 
 ---
 
-### Input
-This stage should use the same structured project evidence as the functional stage, especially:
-- `Invention_disclosure.prior_art_and_problems`
-- `Invention_disclosure.novel_features`
-- `Research_report.executive_summary`
-- `Inventor_QA.questions_and_answers`
-- current patent element list with reference numbers
+## Stage 1 — Functional candidate
 
-Example current patent element list:
-- `body(5)`
-- `table(8)`
-- `sensor(3)`
-- `control unit(10)`
+### Goal
+Produce a short English clause describing **what the target element functionally does inside this specific invention**.
 
-These reference-numbered elements are important for the geometry stage.
+The model must:
 
----
+1. read the structured invention/project inputs **first**
+2. infer the function of the target element from *this* invention's evidence
+3. only then look at the RAG hits, treating them as **style/pattern reference**
+4. adopt phrasing from a RAG hit only if its underlying function genuinely matches the function inferred in step 2
+5. write the functional clause
 
-### Geometry generation rule
-This stage should analyze the inputs to identify:
-- positional clues
-- relation clues
-- structural arrangement clues
-- part-to-part geometry
+### Inputs
+- `target_element.name`
+- `invention_disclosure.*`
+- `research_report.executive_summary`
+- `research_report.element_patent_analysis`
+- `inventor_qa.questions_and_answers`
+- `rag_hits` (top-K, already domain-filtered by name)
 
-It should especially look for standard patent relation patterns such as the English equivalents of:
-- located on / disposed on
-- located between
-- spaced apart from
-- rotatably positioned
-- removably attached
-- extending outward from
-- arranged in sequence
-- positioned at equal intervals
+### Forbidden in Stage 1 output
+- positional, locational, or relational language ("located on", "between", "extending from", etc.)
+- reference numbers of any element (target or other)
+- restating the target element's name
+- ending with a period
+- writing more than one clause
 
-The system should pay special attention to these standard pattern families because they frequently appear in patent-style geometry expressions.
-
----
-
-### Reference-number rule for geometry
-Unlike the functional stage, the geometry stage may and should use other elements’ reference numbers when relevant.
-
-If the geometry of the target element is defined relative to another known component, and that other component exists in the current system input, then the geometry candidate should include that reference number.
-
-Example:
-If the system knows:
-- `body(5)`
-- `table(8)`
-
-and the target element is located on the body or between the body and the table, the geometry candidate may use:
-- `on the body (5)`
-- `between the body (5) and the table (8)`
-
-This is allowed and desirable in the geometry stage.
-
----
-
-### Geometry output rule
-This stage should output:
-- 3 or 4 geometry / relation candidates
-- ranked strongest first
-- confidence labels included
-
-Allowed confidence labels:
-- `high`
-- `medium`
-- `low`
-
-Example output shape
-
+### Output contract
 ```json
 {
-  "target_element": "wing",
-  "geometry_candidates": [
-    {
-      "candidate_text": "located on the body (5) and extending outward from the body (5)",
-      "confidence": "high",
-      "evidence_note": "Strong support from inventor notes and existing component list"
-    },
-    {
-      "candidate_text": "positioned on the body (5) at a distance from the table (8)",
-      "confidence": "medium",
-      "evidence_note": "Partially supported by discussion notes"
-    },
-    {
-      "candidate_text": "arranged in a root region shorter than the root region (301)",
-      "confidence": "low",
-      "evidence_note": "Weak support, partly inferred from comparative structure notes"
-    }
-  ]
+  "target_element": "<name>",
+  "functional_clause": "<single English clause, comma-joinable>",
+  "style_source": "rag" | "inferred" | "none",
+  "evidence_note": "<short justification, 1 sentence>"
 }
 ```
 
----
-
-## Stage 4 — Final definition generation
-
-### Purpose
-This stage receives:
-- structured project inputs
-- functional candidates from Stage 2
-- geometry candidates from Stage 3
-
-Its role is to:
-- inspect the invention context again
-- inspect the ranked candidates and their confidence levels
-- choose the strongest valid combinations
-- produce final patent-style candidate definitions
-
-This stage is the final synthesis layer.
-
----
-
-### Input
-This stage should receive:
-- target element name
-- target element reference number
-- structured trimmed project inputs
-- `functional_candidates`
-- `geometry_candidates`
-
-Input structure validation is important here.
-The final stage should ensure that:
-- candidate structures are present
-- confidence labels are valid
-- target element information is complete
-- malformed upstream outputs are not passed blindly into generation
-
----
-
-## Final definition structure
-The final generated candidate definitions should follow this structure:
-- `[geometry/relation]`
-- `[function]`
-- `[quantity phrase]`
-- `[reference number]`
-- `[component name]`
-
-### Notes
-The final element phrase should appear at the end of the candidate definition.
-
-This final element phrase may be:
-- `at least one wing (4)`
-- `a wing (4)`
-- `wing (4)`
-
-depending on the chosen candidate style.
-
-The system may produce stylistic variants, but the element phrase should remain at the end of the final candidate.
-
----
-
-### Example conceptual structure
-A final candidate may look like:
-
-> `located on the body (2) and extending outward from the body (2), configured to provide lifting force, at least one wing (4)`
-
-or
-
-> `positioned between the body (5) and the support structure (7), configured to support the optical subsystem, a body (5)`
-
-The exact style may vary, but it should combine:
-- geometry / relation
-- function
-- quantity wording
-- reference number
-- element name
-
----
-
-### Final output rule
-This stage should produce:
-- 3 final candidate definitions
-- strongest candidate first
-
-Example output shape
-
+If the evidence is too weak to commit to a function:
 ```json
 {
-  "target_element": "wing",
-  "final_candidates": [
-    {
-      "candidate_text": "located on the body (2) and extending outward from the body (2), configured to provide lifting force, at least one wing (4)",
-      "confidence": "high"
-    },
-    {
-      "candidate_text": "positioned on the body (2) and adapted to support aerodynamic lifting, a wing (4)",
-      "confidence": "medium"
-    },
-    {
-      "candidate_text": "arranged in a root region and configured to generate lift, wing (4)",
-      "confidence": "low"
-    }
-  ]
+  "target_element": "<name>",
+  "functional_clause": "",
+  "style_source": "none",
+  "evidence_note": "Insufficient functional evidence in inputs"
 }
 ```
 
----
+### Stage 1 prompt
 
-## Input and output validation rule
-At every stage, the system should verify that:
-- expected input structure is present
-- malformed upstream output is detected
-- empty or insufficient candidates are handled safely
-- candidate arrays are well-formed
-- confidence labels are valid
+```
+SYSTEM
+You are a senior patent drafting assistant operating as Stage 1 of a three-stage
+definition generator. Your sole responsibility is to produce the FUNCTIONAL
+clause of a patent-style element definition. You do not handle geometry,
+position, or reference numbering. You do not produce the final definition.
 
-The generator should prefer a safe structured failure over a misleading malformed output.
+You are working with a small offline language model. Follow the procedure
+exactly. Do not improvise. Do not produce content outside the requested JSON.
 
----
+PROCEDURE
+Step 1 — Read the invention evidence.
+  Carefully read the invention disclosure, research report, and inventor Q&A.
+  Identify what the target element does inside THIS invention: what role it
+  plays, what problem it addresses, what behavior it provides.
 
-## Local offline LLM usage rule
+Step 2 — Form an internal hypothesis of the function.
+  State to yourself, in one sentence, the function of the target element in
+  this specific invention. Do not write this sentence in the output.
 
-### Model expectation
-The definition generator is expected to run with a local offline LLM, potentially in the 7B or 14B model range.
+Step 3 — Inspect the retrieved similar definitions.
+  Each RAG hit is a definition written for some other element in some other
+  patent. Treat them ONLY as stylistic and lexical reference.
 
-Because these models are smaller and more error-prone than large cloud models, the system must be designed so that the model behaves more like a focused patent-engineering assistant than a general conversational assistant.
+Step 4 — Decide whether any RAG hit is functionally aligned.
+  A RAG hit is "aligned" only if its underlying function clearly matches the
+  function you inferred in Step 2. High similarity score is NOT enough; the
+  function must actually match. If no RAG hit aligns, ignore them.
 
----
+Step 5 — Write the functional clause.
+  - Output a single English clause that states the function.
+  - Use patent-style phrasing such as "configured to ...", "adapted to ...",
+    "operable to ...", "for ...ing ...", "providing ...".
+  - The clause must be joinable with a leading comma (e.g. it should fit at
+    the position of [F] in: "<geometry>, [F], <element phrase>").
+  - Do NOT mention any other element's reference number.
+  - Do NOT mention position, location, attachment, extent, orientation,
+    spacing, or any geometric relation.
+  - Do NOT repeat the target element's name.
+  - Do NOT end with a period.
+  - One clause only.
 
-### Core role rule
-The local model should be prompted to behave as a narrow-task technical reasoning system whose job is to support patent-style definition generation, not as an open-ended chatbot.
+Step 6 — Choose the style source label.
+  - "rag" if you adopted phrasing from an aligned RAG hit
+  - "inferred" if you wrote it purely from the invention evidence
+  - "none" if you cannot commit to a function
 
-The prompts should keep the model focused on:
-- the target component
-- the structured invention inputs
-- the relevant retrieval evidence
-- the exact output contract of the current stage
+If evidence is insufficient, return an empty functional_clause and
+style_source = "none". Do not fabricate.
 
----
+INPUT
+target_element: {target_element_name}
 
-### Best-practice rule for offline LLM use
-When using smaller offline models, the system should follow practical best practices:
-- keep prompts focused and narrow
-- avoid unnecessary prompt length
-- avoid mixing multiple loosely related goals in one step
-- provide clearly structured inputs
-- provide clearly structured output requirements
-- state explicit constraints
-- reduce opportunities for free-form speculation
-- prefer staged reasoning over one-shot generation
+invention_disclosure.prior_art_and_problems:
+{idf_prior_art}
 
----
+invention_disclosure.novel_features:
+{idf_novel_features}
 
-### Hallucination control rule
-Hallucination risk must be treated as a major concern.
+research_report.executive_summary:
+{rr_executive_summary}
 
-The model should be instructed to:
-- rely only on the provided inputs and retrieval evidence
-- avoid inventing unsupported functional or geometric claims
-- avoid using irrelevant retrieval results
-- avoid producing confident text when evidence is weak
-- return weaker-confidence candidates rather than pretending certainty
+research_report.element_patent_analysis:
+{rr_element_patent_analysis}
 
-If the available evidence is weak, the model should still remain constrained and cautious.
+inventor_qa.questions_and_answers:
+{qa_text}
 
----
+retrieved_similar_definitions (style reference only):
+{rag_hits_block}
 
-### Output-discipline rule
-The model must be guided with clear output contracts.
-Each stage should define:
-- required input structure
-- required output structure
-- allowed confidence labels
-- forbidden content patterns where needed
+OUTPUT (return strict JSON, nothing else)
+{
+  "target_element": "{target_element_name}",
+  "functional_clause": "<one short English clause or empty string>",
+  "style_source": "rag" | "inferred" | "none",
+  "evidence_note": "<one sentence>"
+}
+```
 
-This is especially important for smaller local models.
+### Deterministic fallback (Stage 1)
+If the LLM call fails or returns malformed JSON:
 
----
+1. If at least one RAG hit has score ≥ threshold and its `definition_en` parses cleanly into a function-only fragment (no comma-leading positional pattern), reuse a sanitized version of that fragment.
+2. Otherwise, return empty `functional_clause` with `style_source: "none"`.
 
-### Constraint rule
-Prompts should explicitly tell the model:
-- what its role is
-- what stage it is currently in
-- what it is allowed to use
-- what it must not do
-- what the expected output format is
-
-The system should not assume that a small offline model will infer these constraints automatically.
-
----
-
-## Docker and replaceability rule
-The local LLM is expected to run inside a Docker container.
-
-However, the codebase should not be tightly coupled to one permanent model implementation.
-
-The system should be implemented so that:
-- the model can be swapped later
-- containerized local inference can be changed later
-- prompt-building logic remains separable from model-calling logic
-- the generator pipeline does not need to be rewritten when the local model changes
+The fallback must never invent functional content from nothing.
 
 ---
 
-## Practical design goal
-The goal is not over-engineering.
-The goal is to keep the system:
-- modular
-- replaceable
-- prompt-disciplined
-- safe for smaller offline models
-- easy to adapt as local model choices evolve
+## Stage 2 — Geometry / relation candidate
+
+### Goal
+Produce a short English clause describing **where the target element sits and how it relates to other components**, derived strictly from the project documents and the related-elements list.
+
+This stage **does not use RAG**. Geometry is invention-specific and historical retrieval is not a reliable source for it.
+
+### Inputs
+- `target_element.name`
+- `related_elements` (with names and reference numbers)
+- `invention_disclosure.*`
+- `research_report.executive_summary`
+- `research_report.element_patent_analysis`
+- `inventor_qa.questions_and_answers`
+
+### Forbidden in Stage 2 output
+- functional language ("configured to ...", "adapted to ...", "for ...ing")
+- restating the target element's name
+- ending with a period
+- writing more than one clause
+- inventing related elements not present in `related_elements`
+
+### Allowed and encouraged
+- using related elements' names and reference numbers, e.g. `on the body (5)`, `between the body (5) and the table (8)`
+- standard patent geometry patterns:
+  - located on / disposed on / mounted on
+  - located between / positioned between
+  - spaced apart from / at a distance from
+  - rotatably positioned / pivotably attached / removably attached
+  - extending outward from / extending along / extending through
+  - arranged in sequence / positioned at equal intervals / surrounding
+
+### Output contract
+```json
+{
+  "target_element": "<name>",
+  "geometry_clause": "<single English clause, comma-joinable>",
+  "evidence_note": "<short justification, 1 sentence>"
+}
+```
+
+If no geometric relation can be inferred from inputs, return empty:
+```json
+{
+  "target_element": "<name>",
+  "geometry_clause": "",
+  "evidence_note": "No positional or relational evidence in inputs"
+}
+```
+
+### Stage 2 prompt
+
+```
+SYSTEM
+You are Stage 2 of a three-stage patent definition generator. Your sole
+responsibility is to produce the GEOMETRY/RELATION clause of a patent-style
+element definition for THIS specific invention. You do not handle function.
+You do not produce the final definition.
+
+You are working with a small offline language model. Follow the procedure
+exactly. Do not improvise. Do not produce content outside the requested JSON.
+
+PROCEDURE
+Step 1 — Read the invention evidence.
+  Read the invention disclosure, research report, and inventor Q&A. Look ONLY
+  for clues about position, attachment, spacing, orientation, extent, and
+  inter-part relations involving the target element.
+
+Step 2 — Match against the related elements list.
+  Use ONLY the elements present in the related_elements list when writing
+  geometric relations. Do not invent components. When you reference another
+  element, write its reference number in parentheses next to its name, e.g.
+  "the body (5)".
+
+Step 3 — Identify standard relation patterns.
+  Prefer patent-conventional phrasings:
+  - located on / disposed on / mounted on / positioned on
+  - located between / positioned between
+  - spaced apart from / at a distance from
+  - rotatably positioned / pivotably attached / removably attached
+  - extending outward from / extending along / extending through
+  - arranged in sequence / positioned at equal intervals / surrounding
+
+Step 4 — Write the geometry clause.
+  - Output a single English clause that states position/relation only.
+  - The clause must be joinable with a trailing comma (e.g. it should fit at
+    the position of [G] in: "[G], <function>, <element phrase>").
+  - Do NOT include any functional language ("configured to", "adapted to",
+    "for ...ing", "providing").
+  - Do NOT repeat the target element's name.
+  - Do NOT end with a period.
+  - One clause only.
+
+If no positional or relational evidence exists in the inputs, return empty
+geometry_clause. Do not fabricate.
+
+INPUT
+target_element: {target_element_name}
+
+related_elements (name and reference number):
+{related_elements_block}
+
+invention_disclosure.prior_art_and_problems:
+{idf_prior_art}
+
+invention_disclosure.novel_features:
+{idf_novel_features}
+
+research_report.executive_summary:
+{rr_executive_summary}
+
+research_report.element_patent_analysis:
+{rr_element_patent_analysis}
+
+inventor_qa.questions_and_answers:
+{qa_text}
+
+OUTPUT (return strict JSON, nothing else)
+{
+  "target_element": "{target_element_name}",
+  "geometry_clause": "<one short English clause or empty string>",
+  "evidence_note": "<one sentence>"
+}
+```
+
+### Deterministic fallback (Stage 2)
+If the LLM output is malformed or empty:
+
+1. Run a lightweight rule-based scan on the project documents for sentences containing the target element name AND any related-element name AND any keyword from the standard relation pattern list.
+2. If a clean match is found, return its translated/cleaned form.
+3. Otherwise, return empty `geometry_clause`.
+
+The fallback must never invent geometric relations from nothing.
 
 ---
 
-## Why this architecture is preferred
-This staged architecture is preferred because it:
-- separates retrieval from generation
-- separates function from geometry
-- makes RAG usage more controlled
-- reduces the chance of irrelevant retrieval corrupting the final result
-- gives more interpretable intermediate outputs
-- makes the system safer for offline local-model use
+## Stage 3 — Final synthesis
+
+### Goal
+Combine the Stage 1 functional clause and the Stage 2 geometry clause into **one** final candidate definition that follows the project's required template.
+
+After the model produces the final clause, the orchestrator runs a deterministic post-processing pass that injects reference numbers next to any related-element name appearing in the output.
+
+### Inputs
+- `target_element.name`
+- `target_element.reference_number`
+- `related_elements`
+- `functional_clause` (from Stage 1)
+- `geometry_clause` (from Stage 2)
+
+### Final definition template
+```
+[geometry/relation], [function], [quantity phrase] [reference number] [component name]
+```
+
+Allowed quantity phrasings (chosen by the model based on plausibility):
+- `at least one <name> (<ref>)`
+- `a <name> (<ref>)`
+- `<name> (<ref>)`
+
+The element phrase **must appear at the end** of the candidate.
+
+### Synthesis rules
+- If `geometry_clause` is empty, omit the geometry segment and start with the functional clause.
+- If `functional_clause` is empty, omit the functional segment.
+- If both are empty, return an explicit insufficient-evidence result.
+- The final candidate must be a single sentence (one comma-separated clause string), no period at the end.
+
+### Output contract
+```json
+{
+  "target_element": "<name>",
+  "reference_number": <int|null>,
+  "final_candidate": "<final English definition string>",
+  "components_used": {
+    "geometry_clause": "<from Stage 2>",
+    "functional_clause": "<from Stage 1>"
+  }
+}
+```
+
+If both clauses are empty:
+```json
+{
+  "target_element": "<name>",
+  "reference_number": <int|null>,
+  "final_candidate": "",
+  "components_used": { "geometry_clause": "", "functional_clause": "" },
+  "message": "Insufficient evidence to generate a definition"
+}
+```
+
+### Stage 3 prompt
+
+```
+SYSTEM
+You are Stage 3 of a three-stage patent definition generator. Your sole
+responsibility is to combine a pre-written FUNCTIONAL clause and a pre-written
+GEOMETRY/RELATION clause into ONE final patent-style English definition for
+the target element, following a strict template.
+
+You do not invent function. You do not invent geometry. You do not add new
+content. You only assemble, smooth, and finalize.
+
+You are working with a small offline language model. Follow the procedure
+exactly. Do not produce content outside the requested JSON.
+
+TEMPLATE
+[geometry/relation], [function], [quantity phrase] [reference number] [component name]
+
+Allowed quantity phrasings:
+  - "at least one"
+  - "a"
+  - "" (no quantity word, just the bare name)
+Choose the phrasing that reads most naturally for the target element. The
+element phrase MUST be the last segment of the candidate.
+
+PROCEDURE
+Step 1 — Read the two pre-written clauses.
+  geometry_clause: invention-specific positional/relational fragment
+  functional_clause: invention-specific functional fragment
+
+Step 2 — Validate clause shapes.
+  - If geometry_clause is empty, you will omit the geometry segment.
+  - If functional_clause is empty, you will omit the function segment.
+  - Do not paraphrase the clauses heavily. Light smoothing only (joining
+    words, punctuation, removing duplicate phrasing). Preserve any reference
+    numbers already present inside the clauses.
+
+Step 3 — Choose the quantity phrase.
+  Pick the phrasing that fits the element naturally. If unsure, use "a".
+
+Step 4 — Assemble the final candidate using the template.
+  - Join with commas.
+  - Element phrase is last.
+  - No period at the end.
+  - Output a single line.
+  - Do NOT add any explanatory text, no preface, no quotes around the result.
+
+INPUT
+target_element_name: {target_element_name}
+target_element_reference_number: {target_element_reference_number}
+
+geometry_clause: {geometry_clause}
+functional_clause: {functional_clause}
+
+OUTPUT (return strict JSON, nothing else)
+{
+  "target_element": "{target_element_name}",
+  "reference_number": {target_element_reference_number},
+  "final_candidate": "<final English definition string>",
+  "components_used": {
+    "geometry_clause": "{geometry_clause}",
+    "functional_clause": "{functional_clause}"
+  }
+}
+```
+
+### Deterministic fallback (Stage 3)
+If the LLM call fails or returns malformed JSON, the orchestrator assembles the candidate directly:
+
+```
+<geometry_clause>, <functional_clause>, a <element_name> (<reference_number>)
+```
+
+with empty segments dropped and commas normalized. This always succeeds when at least one clause is present.
+
+---
+
+## Reference-number injection (post-processing)
+
+After Stage 3 produces the final candidate (whether via LLM or deterministic fallback), the orchestrator runs a **post-processing pass** that scans the candidate text for occurrences of any related element's name and inserts that element's reference number in parentheses immediately after the name.
+
+### Rules
+1. Iterate `related_elements` in order of **descending name length** (so multi-word names match before substrings).
+2. For each related element with a non-null reference number:
+   - Match the element name as a whole word, case-insensitive.
+   - Skip the match if it is already followed by `(<digits>)`.
+   - Insert ` (<reference_number>)` directly after the matched name.
+3. Do NOT inject the **target element's** own reference number through this pass — the template already places it at the end.
+4. Do NOT double-inject if the LLM already placed the number correctly.
+5. Do NOT inject inside the trailing element phrase (the segment after the last comma).
+
+### Example
+Functional clause: `configured to support the optical subsystem along the table`
+Geometry clause: `mounted on the body and aligned with the sensor`
+Related elements: `body → 5`, `table → 8`, `sensor → 3`
+Target: `bracket → 12`
+
+Pre-injection candidate:
+```
+mounted on the body and aligned with the sensor, configured to support the optical subsystem along the table, a bracket (12)
+```
+
+Post-injection candidate:
+```
+mounted on the body (5) and aligned with the sensor (3), configured to support the optical subsystem along the table (8), a bracket (12)
+```
+
+This rule guarantees deterministic, model-independent reference numbering.
+
+---
+
+## Prompt-engineering principles for offline LLMs
+
+These principles apply to all three stage prompts:
+
+1. **Single-task framing.** Each prompt declares exactly one stage and one output. The system message explicitly forbids the model from doing other stages' work.
+2. **Hard procedural ladder.** Steps are numbered and ordered. The model is told to follow them sequentially.
+3. **Strict JSON output contract.** Every prompt ends with the literal output shape and the instruction "return strict JSON, nothing else".
+4. **Negative constraints first-class.** "Do NOT" rules are listed explicitly with concrete forbidden patterns, not just abstract guidance.
+5. **Empty-output permitted.** When evidence is insufficient, the model is instructed to return an empty field rather than fabricate. This is repeated across stages.
+6. **Bounded inputs.** All free-text inputs are trimmed before insertion. Empty fields are passed as `(none)`.
+7. **Style separation.** RAG evidence is always labeled "stylistic reference only", never "ground truth".
+8. **Determinism for mechanical operations.** Reference number injection, template assembly, and clause concatenation are handled in code, never delegated to the LLM.
+9. **Per-stage fallback.** Every stage has a deterministic fallback so the pipeline produces a usable result even with an unreliable model.
 
 ---
 
 ## Modularity rule
-The definition generator must be implemented in a modular way.
 
-Do not hard-bind:
+The generator must be implemented so that the following components can each be replaced without rewriting the pipeline:
+
 - the embedding model
-- the retrieval threshold
-- the collection names
-- the functional generator implementation
-- the geometry generator implementation
-- the final composition logic
+- the retrieval threshold and top-K
+- the domain-filtering predicate over the RAG corpus
+- the local LLM endpoint
+- each stage's prompt template
+- the reference-number injection function
 
-These should remain replaceable.
-
-The goal is practical modularity, not unnecessary abstraction.
+The orchestrator should depend on stage interfaces (`run_stage_1(ctx) -> dict`, etc.), not on concrete implementations.
 
 ---
 
 ## V1 scope
-For the first version, the generator only needs to support:
-- retrieval preparation
-- structured retrieval output
-- functional candidate generation
-- geometry / relation candidate generation
-- final generation of 3 ranked candidate definitions
 
-It does not yet need:
-- advanced UI evidence visualization
-- automatic candidate rejection controls
+For the first version, the generator must support:
+
+- a single domain-filtered, name-keyed RAG retrieval used as Stage 1 style reference
+- Stage 1 functional generation with the prompt above
+- Stage 2 geometry generation with the prompt above
+- Stage 3 synthesis producing one candidate
+- post-processing reference-number injection
+- per-stage deterministic fallbacks
+- structured input loading from `invention_disclosure`, `research_report`, and `inventor_qa` tables
+
+It does NOT yet need:
+
+- multiple ranked candidates
+- confidence scoring
+- evidence visualization in the UI
 - chain-of-thought exposure
-- advanced ranking metrics
-- detailed observability dashboards
+- automatic candidate rejection metrics
+- separate `all_elements_context_en` ↔ `definition_en` collections (the existing single-index retrieval is acceptable for V1; the narrowing redesign is a future extension)
 
 ---
 
 ## Future extensions
-Possible later improvements include:
-- configurable thresholds
-- configurable top-k retrieval
-- multiple embedding model options
-- stronger evidence ranking
-- explicit novelty-aware candidate filtering
-- UI display of candidate evidence
-- user selection of preferred candidate
-- logging and evaluation metrics for generated definitions
 
----
-
-## Final implementation rule
-Implement the system so that each stage can be tested independently.
-
-The architecture should remain strong enough for offline local-model use, while flexible enough that:
-- retrieval strategies can change
-- embedding models can change
-- local LLMs can change
-- stage logic can evolve
-
-without redesigning the full system.
+- multiple candidate variants with confidence labels
+- two-collection retrieval narrowing (`all_elements_context_en` then `definition_en`)
+- configurable retrieval thresholds per domain
+- novelty-aware filtering of RAG hits
+- UI display of per-stage intermediate outputs and evidence
+- prompt-version tracking and per-version evaluation metrics

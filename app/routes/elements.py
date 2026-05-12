@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from app import definition_pipeline
 from app.database import get_db
 from app.schemas.element import ElementCreate, ElementLinkResponse, ElementResponse, ElementUpdate
 from app.services import element_service
@@ -31,7 +32,10 @@ def create_element(patent_id: int, data: ElementCreate, db: Session = Depends(ge
 @router.patch("/{element_id}", response_model=ElementResponse)
 def update_element(patent_id: int, element_id: int, data: ElementUpdate, db: Session = Depends(get_db)):
     _get_patent_or_404(patent_id, db)
-    element = element_service.update_element(db, patent_id, element_id, data)
+    try:
+        element = element_service.update_element(db, patent_id, element_id, data)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
     if not element:
         raise HTTPException(status_code=404, detail="Element not found")
     return element
@@ -52,3 +56,25 @@ def delete_element(patent_id: int, element_id: int, db: Session = Depends(get_db
     _get_patent_or_404(patent_id, db)
     if not element_service.delete_element(db, patent_id, element_id):
         raise HTTPException(status_code=404, detail="Element not found")
+
+
+@router.post("/{element_id}/generate-definition")
+def generate_definition_for_element(
+    patent_id: int,
+    element_id: int,
+    top_k: int = 5,
+    db: Session = Depends(get_db),
+):
+    """Run the 3-stage definition pipeline for one element.
+
+    Pulls structured project inputs (invention disclosure, research report,
+    inventor Q&A), the related-elements list, and RAG hits from the project's
+    state, then returns a single candidate definition plus per-stage outputs.
+    """
+    _get_patent_or_404(patent_id, db)
+    result = definition_pipeline.generate_definition(
+        db, patent_id, element_id, top_k=top_k
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Element not found")
+    return result

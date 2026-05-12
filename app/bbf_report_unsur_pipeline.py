@@ -1252,15 +1252,64 @@ class RelationCueLibrary:
 # ---------------------------------------------------------------------------
 
 
+_TRANSLATION_CACHE: dict[str, str] = {}
+
+
 def _translate_tr_to_en(text: str) -> str:
-    """Translate Turkish text to English using deep_translator (Google Translate)."""
+    """Translate Turkish text to English using deep_translator (Google).
+
+    Cached in `_TRANSLATION_CACHE` so repeated names/phrases (very common
+    across a BBF + report pair) skip the network round-trip. For bulk
+    extraction prefer `_translate_tr_to_en_batch`, which sends one HTTP
+    request per batch instead of one per call.
+    """
     if not text or not text.strip():
         return text
+    if text in _TRANSLATION_CACHE:
+        return _TRANSLATION_CACHE[text]
     try:
         from deep_translator import GoogleTranslator
-        return GoogleTranslator(source="tr", target="en").translate(text)
+        result = GoogleTranslator(source="tr", target="en").translate(text)
     except Exception:
         return text
+    if isinstance(result, str):
+        _TRANSLATION_CACHE[text] = result
+        return result
+    return text
+
+
+def _translate_tr_to_en_batch(texts: List[str]) -> List[str]:
+    """Translate a list of Turkish texts in one Google Translate request.
+
+    Pulls from `_TRANSLATION_CACHE` for known strings and only sends the
+    misses. On any network/library error, falls back to the per-item
+    cached path so callers always get a same-length result list.
+    """
+    if not texts:
+        return []
+    out: List[str] = [""] * len(texts)
+    pending_idx: List[int] = []
+    pending_txt: List[str] = []
+    for i, t in enumerate(texts):
+        if not t or not t.strip():
+            out[i] = t
+        elif t in _TRANSLATION_CACHE:
+            out[i] = _TRANSLATION_CACHE[t]
+        else:
+            pending_idx.append(i)
+            pending_txt.append(t)
+
+    if pending_txt:
+        try:
+            from deep_translator import GoogleTranslator
+            translated = GoogleTranslator(source="tr", target="en").translate_batch(pending_txt)
+        except Exception:
+            translated = [_translate_tr_to_en(t) for t in pending_txt]
+        for i, src, tr in zip(pending_idx, pending_txt, translated):
+            result = tr if isinstance(tr, str) and tr else src
+            out[i] = result
+            _TRANSLATION_CACHE[src] = result
+    return out
 
 
 class OpenAICompatibleClient:
@@ -1343,10 +1392,18 @@ class HeuristicLLMExtractor:
         max_chars_per_chunk: int,
     ) -> List[RawElement]:
         _ = (source, context_text, max_chars_per_chunk)
+        # One batched HTTP request for all element names + definitions
+        # instead of two per candidate. With ~20 elements that turns
+        # ~40 round-trips into 1, saving 30-90s on a typical run.
+        names_tr = [c.name_tr for c in candidates]
+        defs_tr = [c.definition_tr for c in candidates]
+        names_en = _translate_tr_to_en_batch(names_tr + defs_tr)
+        split = len(candidates)
+        translated_names = names_en[:split]
+        translated_defs = names_en[split:]
+
         out: List[RawElement] = []
-        for cand in candidates:
-            name_en = self._to_simple_english(cand.name_tr)
-            def_en = self._to_simple_english(cand.definition_tr)
+        for cand, name_en, def_en in zip(candidates, translated_names, translated_defs):
             out.append(
                 RawElement(
                     source=cand.source,
@@ -1370,43 +1427,54 @@ class HeuristicLLMExtractor:
     ) -> List[RawRelation]:
         _ = (source, max_chars_per_chunk)
         names = [e.name_tr for e in elements]
-        out: List[RawRelation] = []
 
+        # Two-pass build so all sentence translations go through one
+        # batched HTTP request instead of one per relation.
+        primary: list[tuple[str, str, str]] = []  # (subj, obj, sent)
         for sent in candidate_sentences:
             sent_n = normalize_for_match(sent)
             hits = [name for name in names if normalize_for_match(name) in sent_n]
             if len(hits) < 2:
                 continue
+            primary.append((hits[0], hits[1], sent))
 
-            subj, obj = hits[0], hits[1]
-            out.append(
-                RawRelation(
-                    source=source,
-                    subject_name_tr=subj,
-                    object_name_tr=obj,
-                    relation_sentence_tr=sent,
-                    relation_sentence_en=self._to_simple_english(sent),
-                    evidence_text_tr=sent,
-                    confidence=0.45,
+        out: List[RawRelation] = []
+        if primary:
+            sents_en = _translate_tr_to_en_batch([p[2] for p in primary])
+            for (subj, obj, sent), sent_en in zip(primary, sents_en):
+                out.append(
+                    RawRelation(
+                        source=source,
+                        subject_name_tr=subj,
+                        object_name_tr=obj,
+                        relation_sentence_tr=sent,
+                        relation_sentence_en=sent_en,
+                        evidence_text_tr=sent,
+                        confidence=0.45,
+                    )
                 )
-            )
 
         # Fallback: if sentence matching could not map two elements, create
         # conservative sequential relations so downstream workflow stays usable.
         if self.enable_relation_fallback and not out and len(elements) >= 2:
             fallback_sentences = candidate_sentences or [e.definition_tr for e in elements]
+            fb_pairs: list[tuple[str, str, str]] = []
             for idx in range(len(elements) - 1):
                 sentence = fallback_sentences[idx % len(fallback_sentences)] if fallback_sentences else ""
                 if not sentence:
                     sentence = f"{elements[idx].name_tr} ile {elements[idx+1].name_tr} bağlantılıdır."
+                fb_pairs.append((elements[idx].name_tr, elements[idx + 1].name_tr, sentence))
+
+            sents_en = _translate_tr_to_en_batch([p[2] for p in fb_pairs])
+            for (subj, obj, sent), sent_en in zip(fb_pairs, sents_en):
                 out.append(
                     RawRelation(
                         source=source,
-                        subject_name_tr=elements[idx].name_tr,
-                        object_name_tr=elements[idx + 1].name_tr,
-                        relation_sentence_tr=sentence,
-                        relation_sentence_en=self._to_simple_english(sentence),
-                        evidence_text_tr=sentence,
+                        subject_name_tr=subj,
+                        object_name_tr=obj,
+                        relation_sentence_tr=sent,
+                        relation_sentence_en=sent_en,
+                        evidence_text_tr=sent,
                         confidence=self.fallback_relation_confidence,
                     )
                 )
