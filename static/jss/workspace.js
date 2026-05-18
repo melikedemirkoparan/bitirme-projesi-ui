@@ -19,7 +19,10 @@ async function api(path, opts = {}) {
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: 'Request failed' }));
-    throw new Error(err.detail || 'Request failed');
+    const msg = Array.isArray(err.detail)
+      ? err.detail.map(x => x.msg || JSON.stringify(x)).join('; ')
+      : (err.detail || 'Request failed');
+    throw new Error(msg);
   }
   if (res.status === 204) return null;
   return res.json();
@@ -146,9 +149,9 @@ function _renderClaimCard(c) {
   const expanded   = _claimExpanded[c.claim_id] !== false;
   const linkedElems = _claimElements[c.claim_id] || [];
   const status = _deriveClaimStatus(linkedElems);
-  const parentClaim = c.parent_claim_id
-    ? _claims.find(p => p.claim_id === c.parent_claim_id)
-    : null;
+  const parentIds = c.parent_claim_ids || [];
+  const parentClaims = _claims.filter(p => parentIds.includes(p.claim_id));
+  const parentClaim = parentClaims.length > 0 ? parentClaims : null;
 
   const statusBadge = status
     ? `<span class="claim-status-badge claim-status--${status.toLowerCase()}">
@@ -191,6 +194,11 @@ function _renderClaimCard(c) {
                   onclick="event.stopPropagation(); openAddElementsModal(${c.claim_id})">
             + Add Elements
           </button>
+          <button class="btn btn-sm btn-secondary"
+                  onclick="event.stopPropagation(); openClaimDraftModal(${c.claim_id})"
+                  title="Generate claim draft">
+            Draft
+          </button>
           <button class="claim-delete-btn"
                   onclick="event.stopPropagation(); deleteClaim(${c.claim_id})"
                   title="Delete claim">
@@ -205,7 +213,7 @@ function _renderClaimCard(c) {
       </div>
 
       ${parentClaim ? `
-      <div class="claim-dep-hint">↳ depends on Claim ${parentClaim.claim_number}</div>` : ''}
+      <div class="claim-dep-hint">↳ depends on ${parentClaims.map(p => `Claim ${p.claim_number}`).join(', ')}</div>` : ''}
 
       ${expanded ? _renderElemTree(c.claim_id, linkedElems) : ''}
     </div>
@@ -394,7 +402,11 @@ function rewriteWithReport() {
 }
 
 function goToAIDraft() {
-  alert('AI Draft — coming soon.');
+  if (!_selectedClaimId) {
+    alert('Please select a claim first.');
+    return;
+  }
+  openClaimDraftModal(_selectedClaimId);
 }
 
 async function deleteClaim(claimId) {
@@ -426,6 +438,129 @@ async function deleteClaim(claimId) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// Claim Draft Modal
+// ═══════════════════════════════════════════════════════════════
+
+let _draftClaimId = null;
+
+function openClaimDraftModal(claimId) {
+  _draftClaimId = claimId;
+  const claim = _claims.find(c => c.claim_id === claimId);
+  if (!claim) return;
+
+  const isIndependent = claim.claim_dependency_type === 'independent';
+  const isApparatus   = claim.claim_category === 'apparatus';
+  const isMethod      = claim.claim_category === 'method';
+
+  // Modal title
+  document.getElementById('claimDraftModalTitle').textContent =
+    `Claim ${claim.claim_number} — ${claim.claim_dependency_type} ${claim.claim_category}`;
+
+  // System name — only shown for independent claims
+  const patentNameEl = document.getElementById('patentNameDisplay');
+  const patentName = patentNameEl ? patentNameEl.textContent.trim() : '';
+  const systemNameRow = document.getElementById('draftSystemNameRow');
+  if (systemNameRow) systemNameRow.style.display = isIndependent ? 'block' : 'none';
+  document.getElementById('draftSystemName').value = patentName;
+
+  // method_purpose field — only for independent method
+  const purposeRow = document.getElementById('draftPurposeRow');
+  purposeRow.style.display = (isIndependent && isMethod) ? 'block' : 'none';
+  document.getElementById('draftMethodPurpose').value = '';
+
+  // Inventive-step checkboxes — only for independent apparatus
+  const inventiveSection = document.getElementById('draftInventiveSection');
+  inventiveSection.style.display = (isIndependent && isApparatus) ? 'block' : 'none';
+
+  if (isIndependent && isApparatus) {
+    const elems = _claimElements[claimId] || [];
+    const container = document.getElementById('draftInventiveCheckboxes');
+    container.innerHTML = elems.length === 0
+      ? '<p style="font-size:12px;color:var(--text-muted)">No elements linked.</p>'
+      : elems.map(e => `
+          <label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:13px;cursor:pointer;">
+            <input type="checkbox" name="inventiveElem" value="${e.element_id}">
+            <span>${esc(e.element_name)}${e.reference_number ? ` (${esc(e.reference_number)})` : ''}</span>
+          </label>`).join('');
+  }
+
+  // Clear result area
+  document.getElementById('draftResultArea').innerHTML = '';
+  document.getElementById('claimDraftModal').classList.add('active');
+}
+
+function closeClaimDraftModal() {
+  document.getElementById('claimDraftModal').classList.remove('active');
+  _draftClaimId = null;
+}
+
+async function submitClaimDraft() {
+  if (!_draftClaimId) return;
+  const patentId = getPatentId();
+  const claim = _claims.find(c => c.claim_id === _draftClaimId);
+  if (!claim) return;
+
+  const systemName  = document.getElementById('draftSystemName').value.trim();
+  const methodPurpose = document.getElementById('draftMethodPurpose').value.trim();
+
+  const groupBIds = [...document.querySelectorAll('input[name="inventiveElem"]:checked')]
+    .map(cb => parseInt(cb.value, 10));
+
+  const payload = {
+    system_name: systemName,
+    group_b_element_ids: groupBIds,
+    method_purpose: methodPurpose,
+    parent_claim_numbers: [],
+  };
+
+  const resultArea = document.getElementById('draftResultArea');
+  resultArea.innerHTML = '<p style="font-size:12px;color:var(--text-muted)">Generating…</p>';
+
+  try {
+    const res = await api(
+      '/patents/' + patentId + '/claims/' + _draftClaimId + '/generate-draft',
+      { method: 'POST', body: JSON.stringify(payload) }
+    );
+
+    if (!res.success) {
+      resultArea.innerHTML = `<p style="color:var(--error);font-size:13px;">⚠ ${esc(res.warning || 'Unknown error')}</p>`;
+      return;
+    }
+
+    resultArea.innerHTML = `
+      <p style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Generated draft — review and apply:</p>
+      <textarea id="draftResultText" style="width:100%;min-height:140px;font-size:13px;
+        font-family:inherit;padding:8px;border:1px solid var(--border);border-radius:6px;
+        background:var(--bg-secondary);color:var(--text-primary);resize:vertical;"
+      >${esc(res.claim_text)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-primary btn-sm" onclick="applyClaimDraft()">Apply to claim</button>
+        <button class="btn btn-secondary btn-sm" onclick="closeClaimDraftModal()">Discard</button>
+      </div>`;
+  } catch (e) {
+    resultArea.innerHTML = `<p style="color:var(--error);font-size:13px;">Error: ${esc(e.message)}</p>`;
+  }
+}
+
+async function applyClaimDraft() {
+  const text = document.getElementById('draftResultText')?.value;
+  if (!text || !_draftClaimId) return;
+  const patentId = getPatentId();
+  try {
+    await api('/patents/' + patentId + '/claims/' + _draftClaimId + '/text', {
+      method: 'PATCH',
+      body: JSON.stringify({ claim_text: text }),
+    });
+    closeClaimDraftModal();
+    await loadClaims();
+    // If this claim is selected in the draft editor, refresh it too
+    if (_selectedClaimId === _draftClaimId) selectClaim(_draftClaimId);
+  } catch (e) {
+    alert('Failed to apply draft: ' + e.message);
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Add Claim Modal
 // ═══════════════════════════════════════════════════════════════
 
@@ -451,13 +586,20 @@ function onDependencyTypeChange() {
 }
 
 function _populateParentClaimDropdown() {
-  const sel = document.getElementById('selectParentClaim');
-  sel.innerHTML = '<option value="">— select a parent claim —</option>';
+  const container = document.getElementById('parentClaimCheckboxes');
+  container.innerHTML = '';
   _claims.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.claim_id;
-    opt.textContent = `Claim ${c.claim_number} (${c.claim_dependency_type}, ${c.claim_category})`;
-    sel.appendChild(opt);
+    const label = document.createElement('label');
+    label.style.cssText = 'display:flex;align-items:center;gap:6px;padding:4px 0;cursor:pointer;font-size:13px;';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = c.claim_id;
+    cb.name = 'parentClaimCheckbox';
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(
+      `Claim ${c.claim_number} — ${c.claim_dependency_type}, ${c.claim_category}`
+    ));
+    container.appendChild(label);
   });
 }
 
@@ -466,20 +608,20 @@ async function submitAddClaim() {
   const depType  = document.querySelector('input[name="claimDependencyType"]:checked')?.value;
   const category = document.getElementById('selectClaimCategory').value;
 
-  let parentClaimId = null;
+  let parentClaimIds = [];
   if (depType === 'dependent') {
-    const raw = document.getElementById('selectParentClaim').value;
-    if (!raw) {
-      alert('Please select a parent claim for a dependent claim.');
+    const checked = [...document.querySelectorAll('input[name="parentClaimCheckbox"]:checked')];
+    if (checked.length === 0) {
+      alert('Please select at least one parent claim for a dependent claim.');
       return;
     }
-    parentClaimId = parseInt(raw, 10);
+    parentClaimIds = checked.map(cb => parseInt(cb.value, 10));
   }
 
   const payload = {
     claim_dependency_type: depType,
     claim_category: category,
-    parent_claim_id: parentClaimId,
+    parent_claim_ids: parentClaimIds,
   };
 
   try {
@@ -490,7 +632,7 @@ async function submitAddClaim() {
     closeAddClaimModal();
     await loadClaims();
   } catch (e) {
-    alert('Failed to add claim: ' + e.message);
+    alert('Failed to add claim: ' + (e.message || JSON.stringify(e)));
   }
 }
 

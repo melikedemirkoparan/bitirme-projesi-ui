@@ -182,18 +182,59 @@
           </select>
         </div>
 
-        <!-- Parent claim — only visible when dependent is selected -->
+        <!-- Parent claims — only visible when dependent is selected -->
         <div class="form-section" id="parentClaimSection" style="display:none;">
-          <label class="form-label" for="selectParentClaim">Parent Claim *</label>
-          <select id="selectParentClaim">
-            <option value="">— select a parent claim —</option>
-          </select>
+          <label class="form-label">Parent Claims * <span style="font-size:11px;color:var(--text-muted)">(select one or more)</span></label>
+          <div id="parentClaimCheckboxes" style="max-height:140px;overflow-y:auto;padding:4px 0;"></div>
         </div>
       </div>
 
       <div class="modal-footer">
         <button class="btn" onclick="closeAddClaimModal()">Cancel</button>
         <button class="btn btn-primary" onclick="submitAddClaim()">Add Claim</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════
+       MODAL — Claim Draft Generator
+       ═══════════════════════════════════════════════════════════ -->
+  <div id="claimDraftModal" class="modal-overlay">
+    <div class="modal-box" style="max-width:560px;">
+      <div class="modal-header">
+        <span id="claimDraftModalTitle" class="modal-title">Generate Claim Draft</span>
+        <button class="modal-close" onclick="closeClaimDraftModal()">✕</button>
+      </div>
+      <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+
+        <!-- System name — independent only -->
+        <div class="form-section" id="draftSystemNameRow">
+          <label class="form-label">System name <span style="font-size:11px;color:var(--text-muted)">e.g. an adjustable mounting system (1)</span></label>
+          <input id="draftSystemName" type="text" class="form-input" placeholder="an adjustable equipment mounting system (1)">
+        </div>
+
+        <!-- Method purpose — independent method only -->
+        <div class="form-section" id="draftPurposeRow" style="display:none;">
+          <label class="form-label">Method purpose <span style="font-size:11px;color:var(--text-muted)">e.g. mounting equipment on a body</span></label>
+          <input id="draftMethodPurpose" type="text" class="form-input" placeholder="mounting equipment on a body">
+        </div>
+
+        <!-- Inventive-step checkboxes — independent apparatus only -->
+        <div id="draftInventiveSection" style="display:none;">
+          <label class="form-label" style="margin-bottom:6px;">
+            Elements contributing to inventive step
+            <span style="font-size:11px;color:var(--text-muted)">(checked → "characterized in that")</span>
+          </label>
+          <div id="draftInventiveCheckboxes" style="max-height:160px;overflow-y:auto;padding:4px 0;
+            border:1px solid var(--border);border-radius:6px;padding:8px;"></div>
+        </div>
+
+        <!-- Result -->
+        <div id="draftResultArea"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn" onclick="closeClaimDraftModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitClaimDraft()">Generate</button>
       </div>
     </div>
   </div>
@@ -463,6 +504,6 @@
     </div>
   </aside>
 
-  <script src="/static/jss/workspace.js?v=5"></script>
+  <script src="/static/jss/workspace.js?v=9"></script>
 </body>
 </html>

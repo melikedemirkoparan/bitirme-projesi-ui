@@ -49,9 +49,9 @@ def health_check():
 # Serve the single-page frontend
 @app.get("/")
 def serve_home():
-    return FileResponse("static/home.html")
+    return FileResponse("static/home.html", headers={"Cache-Control": "no-store"})
 
 
 @app.get("/workspace")
 def serve_workspace():
-    return FileResponse("static/workspace.html")
+    return FileResponse("static/workspace.html", headers={"Cache-Control": "no-store"})

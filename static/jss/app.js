@@ -27,7 +27,7 @@ async function api(path, opts = {}) {
   const h = { ...opts.headers };
   if (opts.body && typeof opts.body === 'string') h['Content-Type'] = 'application/json';
   const res = await fetch('/api' + path, { ...opts, headers: h });
-  if (!res.ok) { const e = await res.json().catch(() => ({ detail: 'Request failed' })); throw new Error(e.detail || 'Request failed'); }
+  if (!res.ok) { const e = await res.json().catch(() => ({ detail: 'Request failed' })); const msg = Array.isArray(e.detail) ? e.detail.map(x => x.msg || JSON.stringify(x)).join('; ') : (e.detail || 'Request failed'); throw new Error(msg); }
   if (res.status === 204) return null;
   return res.json();
 }
@@ -216,7 +216,8 @@ function renderClaimCard(c) {
   const isIndep = c.claim_dependency_type === 'independent';
   const linked = _claimElements[c.claim_id] || [];
   const status = claimStatus(c.claim_id);
-  const parent = c.parent_claim_id ? _claims.find(p => p.claim_id === c.parent_claim_id) : null;
+  const parentIds = c.parent_claim_ids || [];
+  const parents = _claims.filter(p => parentIds.includes(p.claim_id));
 
   const statusBadge = status ? `<span class="claim-status-badge claim-status--${status.toLowerCase()}">${status === 'Ready' ? '✓' : '⚠'} ${status}</span>` : '';
   const chevron = expanded ? '∨' : '›';
@@ -235,10 +236,13 @@ function renderClaimCard(c) {
       </div>
       <div class="claim-header-right">
         <button class="btn btn-sm btn-primary" onclick="event.stopPropagation();openLinkElemModal(${c.claim_id})">+ Add Elements</button>
-        <button class="claim-delete-btn" onclick="event.stopPropagation();deleteClaim(${c.claim_id})" title="Delete">🗑</button>
       </div>
     </div>
-    ${parent ? `<div class="claim-dep-hint">↳ depends on Claim ${parent.claim_number}</div>` : ''}
+    <div style="display:flex;justify-content:flex-end;gap:6px;padding:0 12px 6px 12px;">
+      <button class="btn btn-sm" onclick="event.stopPropagation();openEditClaimModal(${c.claim_id})" title="Edit claim">✎ Edit</button>
+      <button class="claim-delete-btn" onclick="event.stopPropagation();deleteClaim(${c.claim_id})" title="Delete claim">🗑</button>
+    </div>
+    ${parents.length ? `<div class="claim-dep-hint">↳ depends on ${parents.map(p => 'Claim ' + p.claim_number).join(', ')}</div>` : ''}
     ${expanded ? renderElemTree(c.claim_id, linked) : ''}
   </div>`;
 }
@@ -343,6 +347,71 @@ async function deleteClaim(claimId) {
   } catch (e) { alert(e.message); }
 }
 
+// ── Edit Claim Modal ────────────────────────────────────────────
+let _editClaimId = null;
+
+function openEditClaimModal(claimId) {
+  _editClaimId = claimId;
+  const claim = _claims.find(c => c.claim_id === claimId);
+  if (!claim) return;
+
+  // Set current values
+  document.querySelectorAll('input[name="editClaimDepType"]').forEach(r => {
+    r.checked = r.value === claim.claim_dependency_type;
+  });
+  document.getElementById('editClaimCategory').value = claim.claim_category;
+
+  // Populate parent checkboxes (all other claims)
+  const container = document.getElementById('editParentClaimCheckboxes');
+  const currentParentIds = claim.parent_claim_ids || [];
+  const others = _claims.filter(c => c.claim_id !== claimId);
+  container.innerHTML = others.length === 0
+    ? '<p style="font-size:12px;color:var(--text-muted)">No other claims available.</p>'
+    : others.map(c => `
+        <label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:13px;cursor:pointer;">
+          <input type="checkbox" name="editParentCheckbox" value="${c.claim_id}" ${currentParentIds.includes(c.claim_id) ? 'checked' : ''}>
+          Claim ${c.claim_number} — ${c.claim_dependency_type}, ${c.claim_category}
+        </label>`).join('');
+
+  // Show/hide parent section
+  document.getElementById('editParentSection').style.display =
+    claim.claim_dependency_type === 'dependent' ? 'block' : 'none';
+
+  document.getElementById('editClaimModal').classList.add('active');
+}
+
+function onEditDepTypeChange() {
+  const dep = document.querySelector('input[name="editClaimDepType"]:checked')?.value;
+  document.getElementById('editParentSection').style.display =
+    dep === 'dependent' ? 'block' : 'none';
+}
+
+async function submitEditClaim() {
+  if (!_editClaimId) return;
+  const dep = document.querySelector('input[name="editClaimDepType"]:checked')?.value;
+  const cat = document.getElementById('editClaimCategory').value;
+
+  let parentClaimIds = [];
+  if (dep === 'dependent') {
+    parentClaimIds = [...document.querySelectorAll('input[name="editParentCheckbox"]:checked')]
+      .map(cb => parseInt(cb.value, 10));
+    if (parentClaimIds.length === 0) {
+      alert('Please select at least one parent claim.');
+      return;
+    }
+  }
+
+  try {
+    await api('/patents/' + _patentId + '/claims/' + _editClaimId, {
+      method: 'PATCH',
+      body: JSON.stringify({ claim_dependency_type: dep, claim_category: cat, parent_claim_ids: parentClaimIds }),
+    });
+    closeModal('editClaimModal');
+    _claims = await api('/patents/' + _patentId + '/claims');
+    renderClaimList();
+  } catch (e) { alert(e.message || JSON.stringify(e)); }
+}
+
 // ── Add Claim Modal ─────────────────────────────────────────────
 function openAddClaimModal() {
   document.querySelectorAll('input[name="claimDepType"]').forEach(r => r.checked = r.value === 'independent');
@@ -357,15 +426,19 @@ function toggleParentClaim() { document.getElementById('parentClaimSection').sty
 async function submitAddClaim() {
   const dep = document.querySelector('input[name="claimDepType"]:checked').value;
   const cat = document.getElementById('claimCategory').value;
-  let pid = null;
-  if (dep === 'dependent') { pid = parseInt(document.getElementById('parentClaimSelect').value); if (!pid) { alert('Select parent.'); return; } }
+  let parentClaimIds = [];
+  if (dep === 'dependent') {
+    const pid = parseInt(document.getElementById('parentClaimSelect').value);
+    if (!pid) { alert('Select parent.'); return; }
+    parentClaimIds = [pid];
+  }
   try {
-    await api('/patents/' + _patentId + '/claims', { method: 'POST', body: JSON.stringify({ claim_dependency_type: dep, claim_category: cat, parent_claim_id: pid }) });
+    await api('/patents/' + _patentId + '/claims', { method: 'POST', body: JSON.stringify({ claim_dependency_type: dep, claim_category: cat, parent_claim_ids: parentClaimIds }) });
     closeModal('addClaimModal');
     _claims = await api('/patents/' + _patentId + '/claims');
     _claims.forEach(c => { if (!_claimElements[c.claim_id]) _claimElements[c.claim_id] = []; if (_claimExpanded[c.claim_id] === undefined) _claimExpanded[c.claim_id] = true; });
     renderClaimList();
-  } catch (e) { alert(e.message); }
+  } catch (e) { alert(e.message || JSON.stringify(e)); }
 }
 
 // ── Link Element Modal ──────────────────────────────────────────
@@ -778,18 +851,100 @@ function insertDraftReport() {
   ta.value = report;
 }
 
-function goToAiDraft() {
-  let text = '';
-  _claims.forEach(cl => {
-    text += 'Claim ' + cl.claim_number + ':\n';
-    (_claimElements[cl.claim_id] || []).forEach(el => {
-      if (el.definition_text) text += '  ' + el.element_name + (el.reference_number ? ' (' + el.reference_number + ')' : '') + ': ' + el.definition_text + '\n';
+function goToAiDraft(evt) {
+  if (!_selectedClaimId) { alert('Please select a claim first.'); return; }
+  const claim = _claims.find(c => c.claim_id === _selectedClaimId);
+  if (!claim) return;
+
+  const isIndependent = claim.claim_dependency_type === 'independent';
+  const isApparatus   = claim.claim_category === 'apparatus';
+  const isMethod      = claim.claim_category === 'method';
+
+  document.getElementById('claimDraftModalTitle').textContent =
+    `Claim ${claim.claim_number} — ${claim.claim_dependency_type} ${claim.claim_category}`;
+
+  const patentName = (document.getElementById('navPatentName')?.textContent || '').trim();
+  document.getElementById('draftSystemName').value = patentName;
+
+  // System name input only shown for independent claims
+  const sysRow = document.getElementById('draftSystemNameRow');
+  if (sysRow) sysRow.style.display = isIndependent ? 'block' : 'none';
+
+  document.getElementById('draftPurposeRow').style.display =
+    (isIndependent && isMethod) ? 'block' : 'none';
+  document.getElementById('draftMethodPurpose').value = '';
+
+  const inventiveSection = document.getElementById('draftInventiveSection');
+  inventiveSection.style.display = (isIndependent && isApparatus) ? 'block' : 'none';
+
+  if (isIndependent && isApparatus) {
+    const elems = _claimElements[_selectedClaimId] || [];
+    document.getElementById('draftInventiveCheckboxes').innerHTML = elems.length === 0
+      ? '<p style="font-size:12px;color:var(--text-muted)">No elements linked.</p>'
+      : elems.map(e => `
+          <label style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:13px;cursor:pointer;">
+            <input type="checkbox" name="inventiveElem" value="${e.element_id}">
+            <span>${esc(e.element_name)}${e.reference_number ? ' (' + esc(e.reference_number) + ')' : ''}</span>
+          </label>`).join('');
+  }
+
+  document.getElementById('draftResultArea').innerHTML = '';
+  document.getElementById('claimDraftModal').classList.add('active');
+}
+
+async function submitClaimDraftApp() {
+  const claim = _claims.find(c => c.claim_id === _selectedClaimId);
+  if (!claim) return;
+
+  const systemName    = document.getElementById('draftSystemName').value.trim();
+  const methodPurpose = document.getElementById('draftMethodPurpose').value.trim();
+  const groupBIds     = [...document.querySelectorAll('input[name="inventiveElem"]:checked')]
+                          .map(cb => parseInt(cb.value, 10));
+
+  const resultArea = document.getElementById('draftResultArea');
+  resultArea.innerHTML = '<p style="font-size:12px;color:var(--text-muted)">Generating…</p>';
+
+  try {
+    const res = await api('/patents/' + _patentId + '/claims/' + _selectedClaimId + '/generate-draft', {
+      method: 'POST',
+      body: JSON.stringify({ system_name: systemName, group_b_element_ids: groupBIds, method_purpose: methodPurpose, parent_claim_numbers: [] }),
     });
-    text += '\n';
-  });
-  let ta = document.getElementById('draftTextarea');
-  if (!ta) { document.getElementById('draftBody').innerHTML = '<textarea class="draft-textarea" id="draftTextarea"></textarea>'; ta = document.getElementById('draftTextarea'); }
-  ta.value = text;
+
+    if (!res.success) {
+      resultArea.innerHTML = `<p style="color:var(--danger);font-size:13px;">⚠ ${esc(res.warning || 'Unknown error')}</p>`;
+      return;
+    }
+
+    resultArea.innerHTML = `
+      <p style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">Generated draft — review and apply:</p>
+      <textarea id="draftResultText" style="width:100%;min-height:120px;font-size:13px;font-family:inherit;
+        padding:8px;border:1px solid var(--border);border-radius:6px;
+        background:var(--bg-secondary);color:var(--text-primary);resize:vertical;"
+      >${esc(res.claim_text)}</textarea>
+      <div style="display:flex;gap:8px;margin-top:8px;">
+        <button class="btn btn-primary btn-sm" onclick="applyClaimDraftApp()">Apply to claim</button>
+        <button class="btn btn-sm" onclick="closeModal('claimDraftModal')">Discard</button>
+      </div>`;
+  } catch (e) {
+    resultArea.innerHTML = `<p style="color:var(--danger);font-size:13px;">Error: ${esc(e.message)}</p>`;
+  }
+}
+
+async function applyClaimDraftApp() {
+  const text = document.getElementById('draftResultText')?.value;
+  if (!text || !_selectedClaimId) return;
+  try {
+    await api('/patents/' + _patentId + '/claims/' + _selectedClaimId + '/text', {
+      method: 'PATCH',
+      body: JSON.stringify({ claim_text: text }),
+    });
+    const claim = _claims.find(c => c.claim_id === _selectedClaimId);
+    if (claim) claim.claim_text = text;
+    closeModal('claimDraftModal');
+    // Refresh draft textarea if this claim is selected in the editor
+    const ta = document.getElementById('draftTextarea');
+    if (ta) ta.value = text;
+  } catch (e) { alert(e.message); }
 }
 
 // ═══════════════════════════════════════════════════════════════

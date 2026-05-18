@@ -106,7 +106,7 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
             Save
           </button>
-          <button class="btn btn-sm btn-primary" onclick="goToAiDraft()">
+          <button class="btn btn-sm btn-primary" onclick="goToAiDraft(event)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="13" height="13"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
             Go to AI Draft
           </button>
@@ -319,6 +319,61 @@
   </div>
 </div>
 
+<!-- ═══════════ MODAL: Edit Claim ═══════════ -->
+<div id="editClaimModal" class="modal-overlay">
+  <div class="modal">
+    <div class="modal-header"><div><h3>Edit Claim</h3><p>Update claim type, category or parent dependencies</p></div><button class="modal-close" onclick="closeModal('editClaimModal')">×</button></div>
+    <div class="modal-body">
+      <div class="form-section"><label class="form-label">Dependency Type</label>
+        <div style="display:flex;gap:12px">
+          <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px"><input type="radio" name="editClaimDepType" value="independent" onchange="onEditDepTypeChange()"> Independent</label>
+          <label style="font-size:13px;cursor:pointer;display:flex;align-items:center;gap:4px"><input type="radio" name="editClaimDepType" value="dependent" onchange="onEditDepTypeChange()"> Dependent</label>
+        </div>
+      </div>
+      <div class="form-section"><label class="form-label">Category</label>
+        <select id="editClaimCategory"><option value="apparatus">Apparatus</option><option value="method">Method</option></select>
+      </div>
+      <div class="form-section" id="editParentSection" style="display:none">
+        <label class="form-label">Parent Claims <span style="font-size:11px;color:var(--text-muted)">(select one or more)</span></label>
+        <div id="editParentClaimCheckboxes" style="max-height:140px;overflow-y:auto;padding:4px 0;"></div>
+      </div>
+    </div>
+    <div class="modal-footer"><button class="btn" onclick="closeModal('editClaimModal')">Cancel</button><button class="btn btn-primary" onclick="submitEditClaim()">Save</button></div>
+  </div>
+</div>
+
+<!-- ═══════════ MODAL: Claim Draft Generator ═══════════ -->
+<div id="claimDraftModal" class="modal-overlay">
+  <div class="modal" style="max-width:520px;">
+    <div class="modal-header">
+      <div><h3 id="claimDraftModalTitle">Generate Claim Draft</h3></div>
+      <button class="modal-close" onclick="closeModal('claimDraftModal')">×</button>
+    </div>
+    <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
+      <div class="form-section" id="draftSystemNameRow">
+        <label class="form-label">System name <span style="font-size:11px;color:var(--text-muted)">e.g. an adjustable mounting system (1)</span></label>
+        <input id="draftSystemName" type="text" class="form-input" placeholder="an adjustable equipment mounting system (1)">
+      </div>
+      <div class="form-section" id="draftPurposeRow" style="display:none;">
+        <label class="form-label">Method purpose <span style="font-size:11px;color:var(--text-muted)">e.g. mounting equipment on a body</span></label>
+        <input id="draftMethodPurpose" type="text" class="form-input" placeholder="mounting equipment on a body">
+      </div>
+      <div id="draftInventiveSection" style="display:none;">
+        <label class="form-label" style="margin-bottom:6px;">
+          Elements contributing to inventive step
+          <span style="font-size:11px;color:var(--text-muted)">(checked → "characterized in that")</span>
+        </label>
+        <div id="draftInventiveCheckboxes" style="max-height:160px;overflow-y:auto;padding:8px;border:1px solid var(--border);border-radius:6px;"></div>
+      </div>
+      <div id="draftResultArea"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn" onclick="closeModal('claimDraftModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="submitClaimDraftApp()">Generate</button>
+    </div>
+  </div>
+</div>
+
 <!-- ═══════════ MODAL: Add Element ═══════════ -->
 <div id="addElementModal" class="modal-overlay">
   <div class="modal">
@@ -506,6 +561,6 @@
   </div>
 </aside>
 
-<script src="/static/jss/app.js?v=10"></script>
+<script src="/static/jss/app.js?v=17"></script>
 </body>
 </html>
