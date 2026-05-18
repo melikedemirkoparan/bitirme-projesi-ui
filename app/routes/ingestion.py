@@ -36,7 +36,9 @@ def ingestion_status() -> IngestStatusResponse:
                 count = 0
             infos.append(CollectionInfo(name=name, doc_count=count))
 
-    return IngestStatusResponse(has_data=bool(infos), collections=infos)
+    # Only consider data "loaded" if at least one collection has documents
+    has_data = any(info.doc_count > 0 for info in infos)
+    return IngestStatusResponse(has_data=has_data, collections=infos)
 
 
 @router.post("/upload", response_model=IngestResponse)

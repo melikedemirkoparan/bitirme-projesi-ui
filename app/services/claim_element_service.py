@@ -1,3 +1,4 @@
+from __future__ import annotations
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 

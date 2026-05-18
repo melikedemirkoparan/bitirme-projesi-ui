@@ -1,22 +1,29 @@
 """
-Ollama LLM client wrapper.
+LLM client wrapper.
 
-Single integration point between the definition generation pipeline and
-the local offline LLM. All generation modules call this module — nothing
-else in the codebase talks to Ollama directly.
+Single integration point between the generation pipeline / assistant and
+the configured LLM backend. Nothing else in the codebase talks to the
+inference server directly.
 
-Swapping the local model or inference backend only requires changes here
-and in config.py. The rest of the pipeline is unaffected.
+Two wire protocols are supported and auto-selected from the base URL:
 
-API used: Ollama /api/chat
-  - Supports system + user message separation
-  - format=json forces structured JSON output (Ollama >= 0.1.9)
-  - Works with Qwen, Llama, Mistral, and other Ollama-supported models
+  - Ollama native        — base URL has no `/v1` suffix.
+                           Endpoint: POST {base}/api/chat
+                           JSON mode: `"format": "json"`
+  - OpenAI-compatible    — base URL ends with `/v1` (or contains `/v1/`).
+                           Endpoint: POST {base}/chat/completions
+                           JSON mode: `"response_format": {"type": "json_object"}`
+                           Works with llama-cpp-python, vLLM, LM Studio, etc.
+
+Swap the backend by pointing the remote URL at the right server. Model name
+in `settings.ollama_model` is forwarded as-is; OpenAI-compatible servers that
+only load one model treat the field as a hint.
 """
 
 from __future__ import annotations
 
 import json
+import re
 import logging
 
 import httpx
@@ -26,17 +33,66 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Module-level defaults
+# Defaults
 # ---------------------------------------------------------------------------
 
-_DEFAULT_TEMPERATURE = 0.3
-# Low temperature keeps output focused and deterministic.
-# Patent-style generation requires precision, not creativity.
-
+_DEFAULT_TEMPERATURE = 0.5
 _DEFAULT_TIMEOUT = settings.ollama_timeout
-# Seconds to wait for a response from Ollama. Configured via OLLAMA_TIMEOUT.
-# 7B+ models on consumer CPU/iGPU can take several minutes for long prompts
-# (e.g. P2 over a full element-patent analysis), so the default is generous.
+
+
+# ---------------------------------------------------------------------------
+# Protocol detection
+# ---------------------------------------------------------------------------
+
+def _resolve_endpoint(base_url: str) -> tuple[str, str, str]:
+    """Return (root_url, protocol, chat_url) for the given base URL.
+
+    `root_url` has any trailing `/v1` or `/` stripped — useful for building
+    sibling endpoints (e.g. /v1/models, /api/tags) consistently.
+
+    `protocol` is "openai" if the URL ends with `/v1` (or contains `/v1/`),
+    otherwise "ollama".
+
+    `chat_url` is the fully-formed chat endpoint to POST to.
+    """
+    stripped = (base_url or "").rstrip("/")
+
+    if stripped.endswith("/v1"):
+        root = stripped[:-3].rstrip("/")
+        return root, "openai", f"{root}/v1/chat/completions"
+
+    if "/v1/" in stripped:
+        root = stripped.split("/v1/", 1)[0].rstrip("/")
+        return root, "openai", f"{root}/v1/chat/completions"
+
+    return stripped, "ollama", f"{stripped}/api/chat"
+
+
+def _request_headers() -> dict[str, str]:
+    # ngrok free tier injects an HTML interstitial unless this header is set.
+    return {"ngrok-skip-browser-warning": "true"}
+
+
+def _post_chat(
+    chat_url: str,
+    payload: dict,
+    timeout: float,
+    effective_url_for_errors: str,
+) -> httpx.Response:
+    try:
+        return httpx.post(
+            chat_url, json=payload, timeout=timeout, headers=_request_headers()
+        )
+    except httpx.ConnectError as exc:
+        raise LLMConnectionError(
+            f"Cannot reach LLM backend at {effective_url_for_errors}. "
+            "Ensure the inference server is running and the base URL is correct."
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise LLMConnectionError(
+            f"LLM request timed out after {timeout}s. "
+            "The model may be loading or the prompt may be too long."
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -48,49 +104,55 @@ def generate(
     system_prompt: str,
     temperature: float = _DEFAULT_TEMPERATURE,
     timeout: float = _DEFAULT_TIMEOUT,
+    base_url: str | None = None,
+    model_name: str | None = None,
 ) -> str:
-    """Send a chat request to Ollama and return the raw response text.
+    """Send a chat request to the configured backend and return raw text.
 
-    Uses the /api/chat endpoint with a system message and a user message.
-    Does not parse or validate the response — callers handle that.
+    Auto-selects between Ollama `/api/chat` and OpenAI `/v1/chat/completions`
+    based on the URL. Does not parse or validate the response — callers handle that.
 
     Raises:
-        LLMConnectionError: if Ollama is unreachable or times out.
-        LLMResponseError:   if Ollama returns a non-200 status or empty content.
+        LLMConnectionError: if the backend is unreachable or times out.
+        LLMResponseError:   if the backend returns a non-200 status or empty content.
     """
-    url = f"{settings.ollama_base_url}/api/chat"
-    payload = {
-        "model": settings.ollama_model,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user",   "content": user_prompt},
-        ],
-        "stream": False,
-        "options": {"temperature": temperature},
-    }
+    effective_url = base_url or settings.ollama_base_url
+    effective_model = model_name or settings.ollama_model
+    root_url, protocol, chat_url = _resolve_endpoint(effective_url)
 
-    try:
-        response = httpx.post(url, json=payload, timeout=timeout)
-    except httpx.ConnectError as exc:
-        raise LLMConnectionError(
-            f"Cannot reach Ollama at {settings.ollama_base_url}. "
-            "Ensure Ollama is running and the base URL in config is correct."
-        ) from exc
-    except httpx.TimeoutException as exc:
-        raise LLMConnectionError(
-            f"Ollama request timed out after {timeout}s. "
-            "The model may be loading or the prompt may be too long."
-        ) from exc
+    if protocol == "openai":
+        payload = {
+            "model": effective_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            "stream": False,
+            "temperature": temperature,
+        }
+    else:
+        payload = {
+            "model": effective_model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user",   "content": user_prompt},
+            ],
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+
+    response = _post_chat(chat_url, payload, timeout, root_url)
 
     if response.status_code != 200:
         raise LLMResponseError(
-            f"Ollama returned status {response.status_code}: {response.text[:300]}"
+            f"LLM backend returned status {response.status_code} from {chat_url}: "
+            f"{response.text[:300]}"
         )
 
     data = response.json()
-    content = data.get("message", {}).get("content", "")
+    content = _extract_content(data, protocol)
     if not content:
-        raise LLMResponseError("Ollama returned an empty message content.")
+        raise LLMResponseError(f"LLM backend returned empty content via {protocol} protocol.")
     return content
 
 
@@ -99,26 +161,41 @@ def generate_json(
     system_prompt: str,
     temperature: float = _DEFAULT_TEMPERATURE,
     timeout: float = _DEFAULT_TIMEOUT,
+    base_url: str | None = None,
+    model_name: str | None = None,
 ) -> dict:
-    """Send a chat request to Ollama and return parsed JSON.
+    """Send a chat request in JSON mode and return parsed JSON.
 
-    Uses format=json to instruct Ollama to produce JSON output.
-    On a parse failure, retries once with a stricter correction prompt
-    containing the failed output and an explicit JSON-only instruction.
+    Uses the backend's native JSON mode:
+      - Ollama:           "format": "json"
+      - OpenAI-compat:    "response_format": {"type": "json_object"}
 
-    If the retry also fails, raises LLMParseError. The pipeline catches
-    this and produces a structured failure — never propagates garbage.
+    On a parse failure, retries once with a correction prompt containing
+    the failed output and an explicit JSON-only instruction.
 
     Raises:
-        LLMConnectionError: if Ollama is unreachable or times out.
-        LLMResponseError:   if Ollama returns a non-200 status or empty content.
-        LLMParseError:      if JSON cannot be parsed after one retry.
+        LLMConnectionError: backend unreachable / timeout.
+        LLMResponseError:   non-200 / empty content.
+        LLMParseError:      invalid JSON after one retry.
     """
-    url = f"{settings.ollama_base_url}/api/chat"
+    effective_url = base_url or settings.ollama_base_url
+    effective_model = model_name or settings.ollama_model
+    root_url, protocol, chat_url = _resolve_endpoint(effective_url)
 
-    def _call(sp: str, up: str) -> str:
-        payload = {
-            "model": settings.ollama_model,
+    def _build_payload(sp: str, up: str) -> dict:
+        if protocol == "openai":
+            return {
+                "model": effective_model,
+                "messages": [
+                    {"role": "system", "content": sp},
+                    {"role": "user",   "content": up},
+                ],
+                "stream": False,
+                "temperature": temperature,
+                "response_format": {"type": "json_object"},
+            }
+        return {
+            "model": effective_model,
             "messages": [
                 {"role": "system", "content": sp},
                 {"role": "user",   "content": up},
@@ -127,26 +204,18 @@ def generate_json(
             "format": "json",
             "options": {"temperature": temperature},
         }
-        try:
-            response = httpx.post(url, json=payload, timeout=timeout)
-        except httpx.ConnectError as exc:
-            raise LLMConnectionError(
-                f"Cannot reach Ollama at {settings.ollama_base_url}."
-            ) from exc
-        except httpx.TimeoutException as exc:
-            raise LLMConnectionError(
-                f"Ollama request timed out after {timeout}s."
-            ) from exc
 
+    def _call(sp: str, up: str) -> str:
+        response = _post_chat(chat_url, _build_payload(sp, up), timeout, root_url)
         if response.status_code != 200:
             raise LLMResponseError(
-                f"Ollama returned status {response.status_code}: {response.text[:300]}"
+                f"LLM backend returned status {response.status_code} from {chat_url}: "
+                f"{response.text[:300]}"
             )
-
         data = response.json()
-        content = data.get("message", {}).get("content", "")
+        content = _extract_content(data, protocol)
         if not content:
-            raise LLMResponseError("Ollama returned an empty message content.")
+            raise LLMResponseError(f"LLM backend returned empty content via {protocol} protocol.")
         return content
 
     # First attempt
@@ -155,7 +224,7 @@ def generate_json(
         return _parse_json(raw)
     except LLMParseError:
         logger.warning(
-            "Ollama returned unparseable JSON on first attempt. Retrying with correction prompt."
+            "LLM returned unparseable JSON on first attempt. Retrying with correction prompt."
         )
 
     # Single retry — include the failed output so the model can self-correct
@@ -171,9 +240,34 @@ def generate_json(
         return _parse_json(raw_retry)
     except LLMParseError as exc:
         raise LLMParseError(
-            f"Ollama returned unparseable JSON on both attempts. "
+            f"LLM returned unparseable JSON on both attempts. "
             f"Last raw output: {raw_retry[:300]}"
         ) from exc
+
+
+def _extract_content(data: dict, protocol: str) -> str:
+    """Extract the assistant message content from a backend response."""
+    if protocol == "openai":
+        choices = data.get("choices") or []
+        if not choices:
+            return ""
+        first = choices[0]
+        if not isinstance(first, dict):
+            return ""
+        # OpenAI standard: choices[0].message.content
+        msg = first.get("message") or {}
+        if isinstance(msg, dict):
+            content = msg.get("content")
+            if isinstance(content, str):
+                return content
+        # Some servers (older llama.cpp) emit `text` under the choice directly
+        text = first.get("text")
+        if isinstance(text, str):
+            return text
+        return ""
+
+    # Ollama
+    return (data.get("message") or {}).get("content", "") or ""
 
 
 def _parse_json(raw: str) -> dict:
@@ -181,19 +275,25 @@ def _parse_json(raw: str) -> dict:
 
     Layered strategy, each step a strict superset of the previous:
 
-    1. Try parsing as-is (Ollama format=json path).
+    0. Strip <think>...</think> blocks (DeepSeek-R1 reasoning preamble).
+    1. Try parsing as-is.
     2. Strip markdown code fences (``` or ```json … ```).
     3. Extract the first balanced top-level JSON object from the text.
-       This handles remote-backend cases where the model echoes the
-       prompt or adds commentary before/after the JSON. The extractor
-       walks the string tracking brace depth and string-literal state
-       so it does not get confused by braces inside string values.
 
     Raises LLMParseError if every strategy fails.
     """
-    text = raw.strip()
+    # Strategy 0: drop any <think>...</think> reasoning blocks emitted by
+    # DeepSeek-R1 and similar reasoning models. The blocks may appear before
+    # or interleaved with the JSON; remove them all (DOTALL for multiline).
+    text = re.sub(r"<think\b[^>]*>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE)
+    # Some R1 variants emit only the opening tag and no closing tag — drop the
+    # leading "<think>...\n\n" preamble up to the first { we see.
+    if "<think" in text and "</think>" not in text:
+        first_brace = text.find("{")
+        if first_brace > 0:
+            text = text[first_brace:]
+    text = text.strip()
 
-    # Strategy 1: parse as-is.
     try:
         result = json.loads(text)
         if isinstance(result, dict):
@@ -201,7 +301,6 @@ def _parse_json(raw: str) -> dict:
     except json.JSONDecodeError:
         pass
 
-    # Strategy 2: strip markdown fences.
     lines = text.splitlines()
     if lines and lines[0].startswith("```"):
         lines = lines[1:]
@@ -213,15 +312,8 @@ def _parse_json(raw: str) -> dict:
             if isinstance(result, dict):
                 return result
         except json.JSONDecodeError:
-            text = stripped  # fall through to extractor on the cleaner text
+            text = stripped
 
-    # Strategy 3: walk the string and try every balanced JSON object,
-    # preferring the LAST parseable one. Tolerates:
-    #   - leading prose ("Here is the JSON: {...}")
-    #   - prompt echoing (some remote backends repeat the user prompt
-    #     before their own answer; the prompt itself contains example
-    #     JSON, so the first match would be the example, not the answer)
-    #   - models that produce multiple JSON objects in sequence
     candidates = _extract_balanced_json_objects(text)
     for candidate in reversed(candidates):
         try:
@@ -237,12 +329,6 @@ def _parse_json(raw: str) -> dict:
 
 
 def _extract_balanced_json_objects(text: str) -> list[str]:
-    """Return every balanced top-level {...} substring in order.
-
-    Tracks brace depth and string-literal state so braces inside
-    string values do not throw off the count. Honors backslash
-    escapes inside strings.
-    """
     out: list[str] = []
     in_string = False
     escape = False
@@ -278,34 +364,54 @@ def _extract_balanced_json_objects(text: str) -> list[str]:
 # ---------------------------------------------------------------------------
 
 def check_ollama_health() -> tuple[bool, str]:
-    """Check whether Ollama is running and the configured model is available.
+    """Check whether the configured LOCAL backend is reachable and the model is available.
+
+    Auto-selects the probe based on the local URL's protocol:
+      - Ollama:        GET /api/tags  → list of {name: ...}
+      - OpenAI-compat: GET /v1/models → {"data": [{"id": ...}]}
 
     Returns:
-        (True, "")       if healthy and model is present.
-        (False, reason)  if unreachable or model is missing.
-
-    Does not raise — safe to call at startup or from a status endpoint.
+        (True, "")       if healthy and model is present (Ollama) /
+                         the server responds (OpenAI-compat).
+        (False, reason)  otherwise.
     """
+    root_url, protocol, _ = _resolve_endpoint(settings.ollama_base_url)
+
+    if protocol == "openai":
+        probe_url = f"{root_url}/v1/models"
+    else:
+        probe_url = f"{root_url}/api/tags"
+
     try:
-        response = httpx.get(f"{settings.ollama_base_url}/api/tags", timeout=5.0)
+        response = httpx.get(probe_url, timeout=5.0, headers=_request_headers())
     except Exception as exc:
-        return False, f"Cannot reach Ollama: {exc}"
+        return False, f"Cannot reach LLM backend ({protocol}) at {probe_url}: {exc}"
 
     if response.status_code != 200:
-        return False, f"Ollama /api/tags returned status {response.status_code}"
+        return False, f"{probe_url} returned status {response.status_code}"
 
     try:
-        models = response.json().get("models", [])
-        model_names = [m.get("name", "") for m in models]
+        data = response.json()
     except Exception:
-        return False, "Could not parse Ollama model list."
+        return False, "Could not parse model list response."
 
     configured = settings.ollama_model
-    found = configured in model_names
-    if not found:
+
+    if protocol == "openai":
+        # llama-cpp.server returns {"data": [{"id": "<model_id>"}]} or similar.
+        # For single-model servers the id may be a file path; accept any
+        # non-empty list as healthy.
+        items = data.get("data") if isinstance(data, dict) else None
+        if not items:
+            return False, "OpenAI-compat /v1/models returned no entries."
+        return True, ""
+
+    # Ollama
+    models = data.get("models", []) if isinstance(data, dict) else []
+    model_names = [m.get("name", "") for m in models]
+    if configured not in model_names:
         available = ", ".join(model_names) or "none"
         return False, f"Model '{configured}' not found in Ollama. Available: {available}"
-
     return True, ""
 
 
@@ -314,11 +420,11 @@ def check_ollama_health() -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 class LLMConnectionError(RuntimeError):
-    """Raised when Ollama cannot be reached or times out."""
+    """Raised when the LLM backend cannot be reached or times out."""
 
 
 class LLMResponseError(RuntimeError):
-    """Raised when Ollama returns an unexpected HTTP status or empty content."""
+    """Raised when the LLM backend returns an unexpected HTTP status or empty content."""
 
 
 class LLMParseError(RuntimeError):

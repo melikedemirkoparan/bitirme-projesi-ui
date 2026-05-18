@@ -1,3 +1,4 @@
+from __future__ import annotations
 """RAG + LLM routes for AI-assisted definition generation.
 
 Frontend contract is preserved (same paths, same response shapes) so

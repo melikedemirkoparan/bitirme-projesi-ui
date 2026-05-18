@@ -677,7 +677,7 @@ async function aiSuggestDef() {
   const btn = document.getElementById('btnAiSuggest');
   btn.innerHTML = '<span class="spinner"></span> Generating…'; btn.disabled = true;
   try {
-    const r = await api('/patents/' + _patentId + '/elements/' + _elemDefId + '/generate-definition?top_k=5', { method: 'POST' });
+    const r = await api('/patents/' + _patentId + '/elements/' + _elemDefId + '/generate-definition?top_k=15', { method: 'POST' });
     const final = r.final_candidate || '';
     if (final) {
       document.getElementById('defElemText').value = final;
@@ -689,17 +689,32 @@ async function aiSuggestDef() {
     const s2 = (r.stage_outputs && r.stage_outputs.stage2_geometry) || {};
     const ret = r.rag_hits || [];
     const sc = document.getElementById('suggestionsContent');
+    const ragCards = ret.map(x => {
+      const defEn = (x.definition_en || '').trim();
+      const defTr = (x.definition_tr || '').trim();
+      const looksTurkish = /[çğıöşüÇĞİÖŞÜ]/.test(defEn);
+      const shown = defEn || defTr;
+      const langTag = !defEn
+        ? '<em style="color:var(--accent);font-size:10px;">tr fallback</em> '
+        : (looksTurkish ? '<em style="color:var(--accent);font-size:10px;">tr in en field</em> ' : '');
+      return `<li style="list-style:none;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;" title="${escAttr(x.title_en||'')}">
+        <strong style="font-size:12px;">${esc(x.element_name_en)}</strong> · ${x.score}
+        <span style="font-size:11px;display:block;color:var(--text-muted);margin-top:2px;white-space:normal;word-break:break-word;">${langTag}${esc(shown)}</span>
+      </li>`;
+    }).join('');
     sc.innerHTML = `<div class="suggestions-grid">
       <div class="suggestion-col">
-        <h5>Stage 1 — Functional</h5>
-        <p style="font-size:12px;color:var(--text-secondary)">${esc(s1.functional_clause || '<em>empty</em>')}</p>
-        <p style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(s1.evidence_note || '')}</p>
-        <h5 style="margin-top:12px">Retrieved (style ref)</h5>
-        <ul>${ret.map(x => `<li title="${esc(x.title_en||'')}"><strong>${esc(x.element_name_en)}</strong> · ${x.score}<br><span style="font-size:11px;color:var(--text-muted)">${esc((x.definition_en||'').substring(0,120))}…</span></li>`).join('')}</ul>
+        <h5>Stage 1 — Generic</h5>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">${esc(s1.generic_clause || s1.functional_clause || '<em>empty</em>')}</p>
+        ${s1.source_sentence ? `<p style="font-size:11px;color:var(--accent);border-left:2px solid var(--accent);padding-left:6px;margin-bottom:4px;font-style:italic;">"${esc(s1.source_sentence)}"</p>` : ''}
+        <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px">${esc(s1.evidence_note || '')}</p>
+        <h5 style="margin-top:8px">Retrieved (style ref) — ${ret.length} hit${ret.length !== 1 ? 's' : ''}</h5>
+        <ul style="padding:0;margin:0;max-height:340px;overflow-y:auto;padding-right:4px;">${ragCards}</ul>
       </div>
       <div class="suggestion-col">
         <h5>Stage 2 — Geometry</h5>
-        <p style="font-size:12px;color:var(--text-secondary)">${esc(s2.geometry_clause || '<em>empty</em>')}</p>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">${esc(s2.geometry_clause || '<em>empty</em>')}</p>
+        ${s2.source_sentence ? `<p style="font-size:11px;color:var(--accent);border-left:2px solid var(--accent);padding-left:6px;margin-bottom:4px;font-style:italic;">"${esc(s2.source_sentence)}"</p>` : ''}
         <p style="font-size:11px;color:var(--text-muted);margin-top:4px">${esc(s2.evidence_note || '')}</p>
       </div>
       <div class="suggestion-col">

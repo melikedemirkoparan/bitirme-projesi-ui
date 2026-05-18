@@ -1,3 +1,4 @@
+from __future__ import annotations
 """Generic key/value store for app-level configuration that must
 survive server restarts.
 

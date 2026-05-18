@@ -853,7 +853,7 @@ async function aiSuggestDefinition() {
   btn.disabled = true;
 
   try {
-    const result = await api('/patents/' + patentId + '/elements/' + _elemDefId + '/generate-definition?top_k=5', {
+    const result = await api('/patents/' + patentId + '/elements/' + _elemDefId + '/generate-definition?top_k=15', {
       method: 'POST',
     });
 
@@ -888,20 +888,36 @@ function showAiSuggestionsModal(result) {
   content.innerHTML = `
     <div class="suggestions-grid">
       <div class="suggestion-col">
-        <h5>Stage 1 — Functional</h5>
-        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">${esc(s1.functional_clause || '<em>empty</em>')}</p>
+        <h5>Stage 1 — Generic</h5>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">${esc(s1.generic_clause || s1.functional_clause || '<em>empty</em>')}</p>
+        ${s1.source_sentence ? `<p style="font-size:11px;color:var(--accent);border-left:2px solid var(--accent);padding-left:6px;margin-bottom:4px;font-style:italic;">"${esc(s1.source_sentence)}"</p>` : ''}
         <p style="font-size:11px;color:var(--text-muted);margin-bottom:12px">${esc(s1.evidence_note || '')}</p>
-        <h5 style="margin-top:12px">Retrieved (style ref)</h5>
-        ${ret.map(r => `
-          <div class="suggestion-example" onclick="applySuggestion('${esc(r.definition_en).replace(/'/g, "\\'")}')" style="cursor:pointer;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;">
+        <h5 style="margin-top:12px">Retrieved (style ref) — ${ret.length} hit${ret.length !== 1 ? 's' : ''}</h5>
+        <div style="max-height:340px;overflow-y:auto;padding-right:4px;">
+        ${ret.map(r => {
+          const defEn = (r.definition_en || '').trim();
+          const defTr = (r.definition_tr || '').trim();
+          // Some RAG entries have Turkish text accidentally stored in
+          // definition_en. Detect by Turkish-only characters and warn so the
+          // user knows why the wording looks wrong.
+          const looksTurkish = /[çğıöşüÇĞİÖŞÜ]/.test(defEn);
+          const shown = defEn || defTr;
+          const langTag = !defEn
+            ? '<em style="color:var(--accent);">tr fallback</em> · '
+            : (looksTurkish ? '<em style="color:var(--accent);">tr in en field</em> · ' : '');
+          const safeForApply = shown.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+          return `
+          <div class="suggestion-example" onclick="applySuggestion('${esc(safeForApply)}')" style="cursor:pointer;padding:8px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;">
             <strong style="font-size:12px;">${esc(r.element_name_en)}</strong> · ${r.score}
-            <span style="font-size:11px;display:block;color:var(--text-muted);margin-top:2px;">${esc((r.definition_en || '').substring(0, 150))}…</span>
-          </div>
-        `).join('')}
+            <span style="font-size:11px;display:block;color:var(--text-muted);margin-top:2px;white-space:normal;word-break:break-word;">${langTag}${esc(shown)}</span>
+          </div>`;
+        }).join('')}
+        </div>
       </div>
       <div class="suggestion-col">
         <h5>Stage 2 — Geometry</h5>
-        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:6px">${esc(s2.geometry_clause || '<em>empty</em>')}</p>
+        <p style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">${esc(s2.geometry_clause || '<em>empty</em>')}</p>
+        ${s2.source_sentence ? `<p style="font-size:11px;color:var(--accent);border-left:2px solid var(--accent);padding-left:6px;margin-bottom:4px;font-style:italic;">"${esc(s2.source_sentence)}"</p>` : ''}
         <p style="font-size:11px;color:var(--text-muted)">${esc(s2.evidence_note || '')}</p>
         <div style="margin-top:24px;">
           <h5>Stage 3 — Final Candidate</h5>

@@ -62,7 +62,7 @@ def delete_element(patent_id: int, element_id: int, db: Session = Depends(get_db
 def generate_definition_for_element(
     patent_id: int,
     element_id: int,
-    top_k: int = 5,
+    top_k: int = 15,
     db: Session = Depends(get_db),
 ):
     """Run the 3-stage definition pipeline for one element.

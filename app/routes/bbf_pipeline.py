@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 BBF/Report Pipeline route — automatic element extraction from BBF + Report documents.
 

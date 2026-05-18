@@ -78,21 +78,28 @@ All free-text fields must be **trimmed and bounded** before being inserted into 
 ## Stage 1 — Functional candidate
 
 ### Goal
-Produce a short English clause describing **what the target element functionally does inside this specific invention**.
+Produce a short English clause describing **what the target element functionally does inside this specific invention**, and tag the output with a confidence level so Stage 3 can surface it to the user.
+
+### Procedure (four-case decision)
 
 The model must:
 
-1. read the structured invention/project inputs **first**
-2. infer the function of the target element from *this* invention's evidence
-3. only then look at the RAG hits, treating them as **style/pattern reference**
-4. adopt phrasing from a RAG hit only if its underlying function genuinely matches the function inferred in step 2
-5. write the functional clause
+1. **Identify the target's functional role in THIS invention** from the structured inputs (invention disclosure, research report executive summary, inventor Q&A). The target may appear in the sources directly by name or **semantically** under an equivalent term (e.g. the target is `laser` but the source describes a `heat source`; the target is `shaft` but the source says `rotating rod`). Treat semantic matches as referring to the target. If neither direct nor semantic mentions yield a clear role, infer what role a component with this name would plausibly play in the invention's overall system.
+2. **Evaluate each RAG hit** by *functional alignment* — does the function described by that hit match the role identified in step 1? Matching is by function, not by name. A hit with a different element name can still be functionally aligned, and a hit with the same name can still be functionally misaligned.
+3. **Pick exactly one of four cases** and write the output accordingly:
+
+   | Case | Condition | Source of clause | `style_source` | `confidence` |
+   |------|-----------|------------------|----------------|--------------|
+   | A | 2+ aligned RAG hits | common functional pattern across hits | `rag` | `high` |
+   | B | exactly 1 aligned RAG hit | functional portion of that hit's definition | `rag` | `high` |
+   | C | no aligned hit, but inputs pin down the function | invention sources only | `inferred` | `low` |
+   | D | no aligned hit AND inputs don't pin down the function | (empty) | `none` | `none` |
 
 ### Inputs
 - `target_element.name`
-- `invention_disclosure.*`
+- `related_elements` (for context only — geometry/relations are Stage 2's job)
+- `invention_disclosure.*` (all three BBF fields: prior_art_and_problems, closest_prior_patents, novel_features)
 - `research_report.executive_summary`
-- `research_report.element_patent_analysis`
 - `inventor_qa.questions_and_answers`
 - `rag_hits` (top-K, already domain-filtered by name)
 
@@ -109,16 +116,18 @@ The model must:
   "target_element": "<name>",
   "functional_clause": "<single English clause, comma-joinable>",
   "style_source": "rag" | "inferred" | "none",
-  "evidence_note": "<short justification, 1 sentence>"
+  "confidence": "high" | "low" | "none",
+  "evidence_note": "<short justification, names which case A/B/C/D applied>"
 }
 ```
 
-If the evidence is too weak to commit to a function:
+If the evidence is too weak to commit to a function (case D):
 ```json
 {
   "target_element": "<name>",
   "functional_clause": "",
   "style_source": "none",
+  "confidence": "none",
   "evidence_note": "Insufficient functional evidence in inputs"
 }
 ```
@@ -187,9 +196,6 @@ invention_disclosure.novel_features:
 research_report.executive_summary:
 {rr_executive_summary}
 
-research_report.element_patent_analysis:
-{rr_element_patent_analysis}
-
 inventor_qa.questions_and_answers:
 {qa_text}
 
@@ -206,12 +212,7 @@ OUTPUT (return strict JSON, nothing else)
 ```
 
 ### Deterministic fallback (Stage 1)
-If the LLM call fails or returns malformed JSON:
-
-1. If at least one RAG hit has score ≥ threshold and its `definition_en` parses cleanly into a function-only fragment (no comma-leading positional pattern), reuse a sanitized version of that fragment.
-2. Otherwise, return empty `functional_clause` with `style_source: "none"`.
-
-The fallback must never invent functional content from nothing.
+If the LLM call fails or returns malformed JSON, return an empty `functional_clause` with `style_source: "none"` and `confidence: "none"`. The fallback must never invent functional content from nothing — Stage 3 can still assemble a definition from the geometry clause alone.
 
 ---
 
@@ -225,9 +226,8 @@ This stage **does not use RAG**. Geometry is invention-specific and historical r
 ### Inputs
 - `target_element.name`
 - `related_elements` (with names and reference numbers)
-- `invention_disclosure.*`
+- `invention_disclosure.*` (all three BBF fields)
 - `research_report.executive_summary`
-- `research_report.element_patent_analysis`
 - `inventor_qa.questions_and_answers`
 
 ### Forbidden in Stage 2 output
@@ -256,7 +256,8 @@ This stage **does not use RAG**. Geometry is invention-specific and historical r
 }
 ```
 
-If no geometric relation can be inferred from inputs, return empty:
+If no geometric relation can be inferred from inputs, return empty. An empty geometry clause is an acceptable outcome — Stage 3 can still produce a final definition from the function clause alone.
+
 ```json
 {
   "target_element": "<name>",
@@ -264,6 +265,8 @@ If no geometric relation can be inferred from inputs, return empty:
   "evidence_note": "No positional or relational evidence in inputs"
 }
 ```
+
+The geometry clause should reference a neighbouring part **with its reference number** only if that part already appears in `related_elements`. If the inventor describes a neighbouring part that has not yet been registered as an element, write its name without a reference number; the deterministic post-processing pass will inject a reference number later if/when that part is added.
 
 ### Stage 2 prompt
 
@@ -326,9 +329,6 @@ invention_disclosure.novel_features:
 research_report.executive_summary:
 {rr_executive_summary}
 
-research_report.element_patent_analysis:
-{rr_element_patent_analysis}
-
 inventor_qa.questions_and_answers:
 {qa_text}
 
@@ -341,22 +341,28 @@ OUTPUT (return strict JSON, nothing else)
 ```
 
 ### Deterministic fallback (Stage 2)
-If the LLM output is malformed or empty:
-
-1. Run a lightweight rule-based scan on the project documents for sentences containing the target element name AND any related-element name AND any keyword from the standard relation pattern list.
-2. If a clean match is found, return its translated/cleaned form.
-3. Otherwise, return empty `geometry_clause`.
-
-The fallback must never invent geometric relations from nothing.
+If the LLM output is malformed or empty, return empty `geometry_clause`. Stage 3 can still assemble a definition from the function clause alone. The fallback must never invent geometric relations from nothing.
 
 ---
 
 ## Stage 3 — Final synthesis
 
 ### Goal
-Combine the Stage 1 functional clause and the Stage 2 geometry clause into **one** final candidate definition that follows the project's required template.
+Combine the Stage 1 functional clause and the Stage 2 geometry clause into **one** final candidate definition that follows the project's required template, and surface the overall confidence.
 
-After the model produces the final clause, the orchestrator runs a deterministic post-processing pass that injects reference numbers next to any related-element name appearing in the output.
+Stage 3 is **deterministic** — the orchestrator performs the template fill in code rather than calling the LLM. This eliminates hallucination risk and the dropped-element-phrase failure mode that small offline models occasionally produce during assembly. After the synthesis step, a deterministic post-processing pass injects reference numbers next to any related-element name appearing in the output.
+
+### Confidence propagation
+Stage 3 derives the final candidate's confidence from Stage 1:
+
+| Stage 1 `confidence` | Stage 2 geometry | Final `confidence` |
+|----------------------|------------------|--------------------|
+| `high`               | any              | `high` |
+| `low`                | any              | `low` |
+| `none`               | non-empty        | `low` (definition rests on geometry alone) |
+| `none`               | empty            | `none` (no candidate returned) |
+
+The final `confidence` is exposed on the pipeline's response so the UI can flag low-confidence suggestions to the patent drafter.
 
 ### Inputs
 - `target_element.name`
@@ -389,6 +395,7 @@ The element phrase **must appear at the end** of the candidate.
   "target_element": "<name>",
   "reference_number": <int|null>,
   "final_candidate": "<final English definition string>",
+  "confidence": "high" | "low" | "none",
   "components_used": {
     "geometry_clause": "<from Stage 2>",
     "functional_clause": "<from Stage 1>"
@@ -402,91 +409,29 @@ If both clauses are empty:
   "target_element": "<name>",
   "reference_number": <int|null>,
   "final_candidate": "",
+  "confidence": "none",
   "components_used": { "geometry_clause": "", "functional_clause": "" },
   "message": "Insufficient evidence to generate a definition"
 }
 ```
 
-### Stage 3 prompt
+### Stage 3 assembly (deterministic, no LLM)
 
-```
-SYSTEM
-You are Stage 3 of a three-stage patent definition generator. Your sole
-responsibility is to combine a pre-written FUNCTIONAL clause and a pre-written
-GEOMETRY/RELATION clause into ONE final patent-style English definition for
-the target element, following a strict template.
-
-You do not invent function. You do not invent geometry. You do not add new
-content. You only assemble, smooth, and finalize.
-
-You are working with a small offline language model. Follow the procedure
-exactly. Do not produce content outside the requested JSON.
-
-TEMPLATE
-[geometry/relation], [function], [quantity phrase] [reference number] [component name]
-
-Allowed quantity phrasings:
-  - "at least one"
-  - "a"
-  - "" (no quantity word, just the bare name)
-Choose the phrasing that reads most naturally for the target element. The
-element phrase MUST be the last segment of the candidate.
-
-PROCEDURE
-Step 1 — Read the two pre-written clauses.
-  geometry_clause: invention-specific positional/relational fragment
-  functional_clause: invention-specific functional fragment
-
-Step 2 — Validate clause shapes.
-  - If geometry_clause is empty, you will omit the geometry segment.
-  - If functional_clause is empty, you will omit the function segment.
-  - Do not paraphrase the clauses heavily. Light smoothing only (joining
-    words, punctuation, removing duplicate phrasing). Preserve any reference
-    numbers already present inside the clauses.
-
-Step 3 — Choose the quantity phrase.
-  Pick the phrasing that fits the element naturally. If unsure, use "a".
-
-Step 4 — Assemble the final candidate using the template.
-  - Join with commas.
-  - Element phrase is last.
-  - No period at the end.
-  - Output a single line.
-  - Do NOT add any explanatory text, no preface, no quotes around the result.
-
-INPUT
-target_element_name: {target_element_name}
-target_element_reference_number: {target_element_reference_number}
-
-geometry_clause: {geometry_clause}
-functional_clause: {functional_clause}
-
-OUTPUT (return strict JSON, nothing else)
-{
-  "target_element": "{target_element_name}",
-  "reference_number": {target_element_reference_number},
-  "final_candidate": "<final English definition string>",
-  "components_used": {
-    "geometry_clause": "{geometry_clause}",
-    "functional_clause": "{functional_clause}"
-  }
-}
-```
-
-### Deterministic fallback (Stage 3)
-If the LLM call fails or returns malformed JSON, the orchestrator assembles the candidate directly:
+The orchestrator builds the final candidate in code:
 
 ```
 <geometry_clause>, <functional_clause>, a <element_name> (<reference_number>)
 ```
 
-with empty segments dropped and commas normalized. This always succeeds when at least one clause is present.
+with empty segments dropped and commas normalized. The quantity phrase defaults to `a`; configurable per-domain in a future revision. This always succeeds when at least one clause is present.
+
+Stage 3 does not call the LLM. Delegating mechanical assembly to a small offline model produced two recurring failure modes — hallucinated content inside the seam, and dropped trailing element phrases — both of which disappear when the join is done deterministically.
 
 ---
 
 ## Reference-number injection (post-processing)
 
-After Stage 3 produces the final candidate (whether via LLM or deterministic fallback), the orchestrator runs a **post-processing pass** that scans the candidate text for occurrences of any related element's name and inserts that element's reference number in parentheses immediately after the name.
+After Stage 3 assembles the final candidate, the orchestrator runs a **post-processing pass** that scans the candidate text for occurrences of any related element's name and inserts that element's reference number in parentheses immediately after the name.
 
 ### Rules
 1. Iterate `related_elements` in order of **descending name length** (so multi-word names match before substrings).

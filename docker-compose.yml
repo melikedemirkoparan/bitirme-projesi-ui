@@ -25,6 +25,9 @@ services:
       DATABASE_URL: postgresql+psycopg://patent_user:patent_pass_password123@db:5432/patent_db
       APP_HOST: "0.0.0.0"
       APP_PORT: "8000"
+      OLLAMA_BASE_URL: "http://host.docker.internal:11434"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - appdata:/app/data
     depends_on:

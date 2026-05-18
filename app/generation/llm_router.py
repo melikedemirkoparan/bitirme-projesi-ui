@@ -1,18 +1,20 @@
 """LLM backend router.
 
-Single dispatch point for both the definition pipeline and the
-assistant. Picks between the remote LLM (`remote_llm_client`,
-ngrok/Colab) and the local Ollama instance (`llm_client`) at call time:
+Single dispatch point for both the definition pipeline and the assistant.
+The protocol is always Ollama-native (`/api/chat`, JSON in / JSON out).
+The only thing that differs between "local" and "remote" is the base URL:
 
-  - remote URL configured -> remote backend
-  - otherwise              -> local Ollama
+  - remote URL configured -> hit the remote Ollama via that URL
+  - otherwise             -> hit the local Ollama at settings.ollama_base_url
 
-Two entry points:
-  - `call_llm`        — raw text out (used by the definition pipeline)
-  - `generate_json`   — parsed dict out (used by the assistant)
+`llm_client` does the actual HTTP work; this module only chooses the URL.
+The model name is the same in both cases (settings.ollama_model). Pull the
+model into your remote Ollama before pointing the URL at it.
 
-Callers never import either backend directly so backends can be
-swapped at runtime without a restart.
+Three entry points:
+  - `call_llm`        — raw text out, single-message (legacy)
+  - `generate_raw`    — raw text out, system+user split (pipeline, no JSON mode)
+  - `generate_json`   — parsed dict out, JSON mode (assistant)
 """
 
 from __future__ import annotations
@@ -22,7 +24,6 @@ from app.generation.llm_client import (
     LLMConnectionError,
     LLMParseError,
     LLMResponseError,
-    _parse_json,
 )
 
 
@@ -41,22 +42,54 @@ def active_backend() -> str:
     return "remote" if remote_llm_client.is_configured() else "local"
 
 
+def _effective_base_url() -> str | None:
+    """Return the remote URL if configured, else None (= local default)."""
+    return remote_llm_client.get_remote_llm_url() or None
+
+
 def call_llm(prompt: str, max_new_tokens: int = 256, temperature: float = 0.2) -> str:
-    """Call the active LLM backend and return raw text. "" on failure.
+    """Call the active Ollama backend and return raw text. "" on failure.
 
-    Same signature as the legacy `rag_engine._call_llm` so the
-    definition pipeline can swap call sites with no other changes.
+    `max_new_tokens` is accepted for backward compatibility with the
+    legacy `rag_engine._call_llm` signature; Ollama controls response
+    length internally and there is no per-call cap in the current
+    /api/chat schema.
     """
-    if remote_llm_client.is_configured():
-        return remote_llm_client.call_llm(prompt, max_new_tokens, temperature)
-
     try:
         return llm_client.generate(
             user_prompt=prompt,
             system_prompt=_PASSTHROUGH_SYSTEM,
             temperature=temperature,
+            base_url=_effective_base_url(),
         )
-    except (llm_client.LLMConnectionError, llm_client.LLMResponseError):
+    except (LLMConnectionError, LLMResponseError) as exc:
+        print(f"[LLM] call_llm failed ({active_backend()}): {exc}")
+        return ""
+
+
+def generate_raw(
+    user_prompt: str,
+    system_prompt: str,
+    temperature: float = 0.35,
+) -> str:
+    """Call the active backend WITHOUT JSON mode and return raw text.
+
+    Unlike `generate_json`, this does NOT set `response_format=json_object`
+    or Ollama's `format=json`. Reasoning models (e.g. DeepSeek-R1) that emit
+    <think>…</think> blocks need raw mode so their chain-of-thought is
+    preserved and the JSON that follows can be parsed by the caller.
+
+    Returns "" on any connection / response error.
+    """
+    try:
+        return llm_client.generate(
+            user_prompt=user_prompt,
+            system_prompt=system_prompt,
+            temperature=temperature,
+            base_url=_effective_base_url(),
+        )
+    except (LLMConnectionError, LLMResponseError) as exc:
+        print(f"[LLM] generate_raw failed ({active_backend()}): {exc}")
         return ""
 
 
@@ -66,68 +99,20 @@ def generate_json(
     temperature: float = 0.15,
     max_new_tokens: int = 800,
 ) -> dict:
-    """Return a parsed JSON dict from the active backend.
+    """Return a parsed JSON dict from the active Ollama backend.
 
-    Local Ollama uses its native `format=json` mode (strict, fast).
-    Remote (Colab Flask) has no JSON mode, so we instruct the model
-    to output JSON in the prompt and parse the response. On a parse
-    failure we retry once with a correction prompt.
+    Uses Ollama's native `format=json` mode. On a parse failure the
+    underlying `llm_client.generate_json` retries once with a correction
+    prompt; if that also fails it raises `LLMParseError`.
 
     Raises:
         LLMConnectionError: backend unreachable / empty response
         LLMResponseError:   non-200 / empty content
         LLMParseError:      invalid JSON after one retry
     """
-    if not remote_llm_client.is_configured():
-        return llm_client.generate_json(
-            user_prompt=user_prompt,
-            system_prompt=system_prompt,
-            temperature=temperature,
-        )
-
-    # Remote path: combine system + user into one prompt the Flask
-    # /generate endpoint can accept. Append a hard JSON instruction
-    # so chat-tuned models (Qwen / Mistral / Llama) reliably emit JSON.
-    json_guard = (
-        "\n\n--- OUTPUT FORMAT ---\n"
-        "Respond with ONE valid JSON object only. "
-        "No markdown, no code fences, no commentary before or after."
-    )
-    combined = f"{system_prompt}\n\n{user_prompt}{json_guard}"
-
-    raw = remote_llm_client.call_llm(
-        combined,
-        max_new_tokens=max_new_tokens,
+    return llm_client.generate_json(
+        user_prompt=user_prompt,
+        system_prompt=system_prompt,
         temperature=temperature,
+        base_url=_effective_base_url(),
     )
-    if not raw:
-        raise LLMConnectionError(
-            "Remote LLM returned an empty response. "
-            "Check that the Colab notebook is still running and reachable."
-        )
-
-    try:
-        return _parse_json(raw)
-    except LLMParseError:
-        pass  # fall through to retry
-
-    correction = (
-        f"{combined}\n\n"
-        "Your previous response could not be parsed as JSON.\n"
-        f"Previous response (truncated):\n{raw[:400]}\n\n"
-        "Respond ONLY with valid JSON. No explanation, no markdown."
-    )
-    raw_retry = remote_llm_client.call_llm(
-        correction,
-        max_new_tokens=max_new_tokens,
-        temperature=temperature,
-    )
-    if not raw_retry:
-        raise LLMConnectionError("Remote LLM returned empty on retry.")
-    try:
-        return _parse_json(raw_retry)
-    except LLMParseError as exc:
-        raise LLMParseError(
-            f"Remote LLM returned unparseable JSON on both attempts. "
-            f"Last raw output (truncated): {raw_retry[:300]}"
-        ) from exc
