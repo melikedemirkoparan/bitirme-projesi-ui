@@ -1,4 +1,15 @@
+from pathlib import Path
+
 from pydantic_settings import BaseSettings
+
+# Project root — this file is app/config.py, so the root is two
+# parents up. Storage/upload paths are anchored here so they stay
+# stable no matter which directory uvicorn is launched from. A
+# relative "./storage" resolves against the process CWD, so ChromaDB
+# silently pointed at a different (empty) folder whenever the server
+# started elsewhere — the cause of the recurring "No Data" / data
+# lost-on-restart bug.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
 class Settings(BaseSettings):
@@ -6,11 +17,11 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
 
-    # Vector store — path for the persistent ChromaDB client
-    chroma_storage_path: str = "./storage"
+    # Vector store — absolute path for the persistent ChromaDB client.
+    chroma_storage_path: str = str(_PROJECT_ROOT / "storage")
 
-    # Local filesystem root for user-uploaded patent input documents
-    uploads_path: str = "./uploads"
+    # Local filesystem root for user-uploaded patent input documents.
+    uploads_path: str = str(_PROJECT_ROOT / "uploads")
 
     # Local LLM — Ollama inference endpoint and model selection
     ollama_base_url: str = "http://localhost:11434"
