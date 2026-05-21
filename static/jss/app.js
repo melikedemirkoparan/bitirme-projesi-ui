@@ -969,14 +969,14 @@ function openComposer() {
 async function generateDraft() {
   const btn = document.getElementById('btnGenerateDraft');
   const out = document.getElementById('composerDraftOutput');
-  if (!_patentId) { alert('Önce bir proje açın.'); return; }
+  if (!_patentId) { alert('Open a project first.'); return; }
 
-  btn.innerHTML = '<span class="spinner"></span> Üretiliyor…'; btn.disabled = true;
-  out.innerHTML = '<p style="color:var(--text-muted)">Taslak üretiliyor… Bölümler ' +
-    'tek tek LLM ile yazılıyor, modele göre birkaç dakika sürebilir.</p>';
+  btn.innerHTML = '<span class="spinner"></span> Generating…'; btn.disabled = true;
+  out.innerHTML = '<p style="color:var(--text-muted)">Generating draft… Sections are ' +
+    'written one by one by the LLM; this may take a few minutes depending on the model.</p>';
 
   try {
-    // Backend takes the (editable) claims text, assembles a full Turkish
+    // Backend takes the (editable) claims text, assembles a full English
     // patent draft section by section, and persists it as patent_draft.
     const res = await api('/patents/' + _patentId + '/draft/generate', {
       method: 'POST',
@@ -986,14 +986,14 @@ async function generateDraft() {
     });
     _composerDraft = res.draft_html || '';
     out.innerHTML = _composerDraft ||
-      '<p style="color:var(--text-muted)">Taslak boş döndü.</p>';
+      '<p style="color:var(--text-muted)">The draft came back empty.</p>';
     if (res.warnings && res.warnings.length) {
       out.innerHTML += '<div style="margin-top:14px;padding:8px 11px;border:1px solid ' +
         'var(--border);border-radius:6px;color:var(--text-muted);font-size:12px">⚠ ' +
         res.warnings.map(esc).join('<br>') + '</div>';
     }
   } catch (e) {
-    out.innerHTML = '<p style="color:#ff8a8a">Taslak üretilemedi: ' + esc(e.message) + '</p>';
+    out.innerHTML = '<p style="color:#ff8a8a">Draft generation failed: ' + esc(e.message) + '</p>';
   } finally {
     btn.innerHTML = '⚡ Generate Draft'; btn.disabled = false;
   }
