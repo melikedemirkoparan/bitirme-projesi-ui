@@ -3,27 +3,28 @@ Patent Draft Composer service.
 
 Spec: docs/patent_draft_composer.md
 
-Assembles a full Turkish patent specification (tarifname) from a project's
-claims plus supporting context (element definitions, invention disclosure).
+Assembles a patent specification from a project's claims plus supporting
+context (element definitions, invention disclosure).
 
-The draft is produced section by section: each section is one LLM call with
-a focused prompt. This keeps every request small enough for small offline /
-reasoning models and lets a single weak section fail without losing the
-whole draft.
+A real patent file has three parts, and that is exactly what this composer
+produces, in this order:
 
-Sections (TÜRKPATENT tarifname order):
-  1. Özet
-  2. Teknik Alan
-  3. Tekniğin Bilinen Durumu
-  4. Buluşun Amacı
-  5. Buluşun Özeti
-  6. Buluşun Detaylı Açıklaması
-  7. İstemler            -- deterministic, copied from the saved claims
+  1. Description -- LLM-written full specification text (technical field,
+                    background, summary, detailed description)
+  2. Claims      -- deterministic; copied verbatim from the saved claims,
+                    their wording is never altered
+  3. Abstract    -- LLM-written concise summary of the invention
 
-LLM calls go through ``llm_router.generate_json`` so the remote Colab LLM
-or the local Ollama instance is chosen at call time. Each section prompt
-asks for a single JSON field ``icerik``; this reuses the router's existing
-JSON parsing/retry and tolerates reasoning-model ``<think>`` blocks.
+Output language is ENGLISH. The saved claims are in English, so a
+consistent specification must be in English too.
+
+The Abstract is generated AFTER the Description and is given the
+Description text as its input, so it genuinely summarises what the
+Description says instead of being written independently from the claims.
+
+LLM calls go through ``llm_router.generate_json``. Each prompt asks for a
+single JSON field ``content``; this reuses the router's JSON parsing/retry
+and tolerates reasoning-model ``<think>`` blocks.
 """
 
 from __future__ import annotations
@@ -51,64 +52,23 @@ from app.services import (
 logger = logging.getLogger(__name__)
 
 
-# Per-input char caps — keep each section prompt small enough to fit a
-# small offline model's context window (and leave a reasoning model room
-# for its <think> block).
-_CLAIMS_CAP = 3000
-_CONTEXT_CAP = 1800
+# Per-input char caps — keep prompts within a small/reasoning model's
+# context window.
+_CLAIMS_CAP = 4000
+_CONTEXT_CAP = 2500
+# The generated description fed back into the abstract prompt is capped so
+# a very long description cannot blow the context window.
+_DESCRIPTION_FEED_CAP = 10000
 
-_SECTION_MAX_TOKENS = 2500
-_SECTION_TEMPERATURE = 0.35
+# Token budgets: the description is long-form prose, the abstract is short
+# (a patent abstract is conventionally ~150 words or fewer).
+_DESCRIPTION_MAX_TOKENS = 3500
+_ABSTRACT_MAX_TOKENS = 600
+_TEMPERATURE = 0.3
 
-_PLACEHOLDER = "[Bu bölüm üretilemedi — LLM bağlantısını kontrol edip tekrar deneyin.]"
-
-
-# ---------------------------------------------------------------------------
-# Section catalogue
-# ---------------------------------------------------------------------------
-
-@dataclass
-class _Section:
-    key: str
-    title: str
-    instruction: str
-
-
-# LLM-generated sections, in output order. İstemler is appended separately
-# (deterministic — copied straight from the saved claims).
-_LLM_SECTIONS: list[_Section] = [
-    _Section(
-        "ozet", "Özet",
-        "Buluşun ne olduğunu, çözdüğü teknik problemi ve sağladığı temel "
-        "faydayı tek bir paragrafta özetle. Yaklaşık 80-150 kelime.",
-    ),
-    _Section(
-        "teknik_alan", "Teknik Alan",
-        "Buluşun ilgili olduğu teknik/teknoloji alanını 2-4 cümleyle açıkla.",
-    ),
-    _Section(
-        "teknigin_bilinen_durumu", "Tekniğin Bilinen Durumu",
-        "Mevcut teknikte bilinen çözümleri, bunların eksiklik ve "
-        "dezavantajlarını, ve buluşun gidermeyi hedeflediği problemleri "
-        "açıkla. 1-2 paragraf.",
-    ),
-    _Section(
-        "bulusun_amaci", "Buluşun Amacı",
-        "Buluşun amaçlarını ve hedeflerini, tekniğin bilinen durumundaki "
-        "problemleri nasıl çözmeyi amaçladığını belirterek açıkla. 1 paragraf.",
-    ),
-    _Section(
-        "bulusun_ozeti", "Buluşun Özeti",
-        "İstemlerde tanımlanan ana unsurlara dayanarak buluşun temel teknik "
-        "özelliklerini özetle. 1-2 paragraf.",
-    ),
-    _Section(
-        "bulusun_detayli_aciklamasi", "Buluşun Detaylı Açıklaması",
-        "Buluşu; istemlerdeki tüm unsurları, bunların birbirleriyle "
-        "ilişkisini ve çalışma şeklini ayrıntılı biçimde açıkla. İstemlerde "
-        "geçen referans numaralarını koru. 2-4 paragraf.",
-    ),
-]
+_PLACEHOLDER = (
+    "[This section could not be generated — check the LLM connection and try again.]"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +83,7 @@ class _DraftContext:
     invention_context: str
     claims_text: str       # substance fed to the LLM (textarea or saved claims)
     extra_context: str     # element definitions + disclosure, capped
-    db_claims: list        # ORM Claim rows, for the deterministic İstemler section
+    db_claims: list        # ORM Claim rows, for the deterministic Claims section
 
 
 def _trim(value: str | None, cap: int) -> str:
@@ -133,13 +93,13 @@ def _trim(value: str | None, cap: int) -> str:
 
 
 def _format_claims(db_claims: list) -> str:
-    """Render the saved claims as 'İstem N: ...' blocks."""
+    """Render the saved claims as 'Claim N: ...' blocks, verbatim."""
     lines = []
     for c in db_claims:
         txt = (c.claim_text or "").strip()
         lines.append(
-            f"İstem {c.claim_number}: {txt}" if txt
-            else f"İstem {c.claim_number}: (metin girilmemiş)"
+            f"Claim {c.claim_number}: {txt}" if txt
+            else f"Claim {c.claim_number}: (no text entered)"
         )
     return "\n\n".join(lines)
 
@@ -175,14 +135,14 @@ def _build_context(
             + (f": {definition.strip()}" if definition and definition.strip() else "")
         )
     if defs:
-        context_parts.append("Unsurlar ve tanımları:\n" + "\n".join(defs))
+        context_parts.append("Elements and their definitions:\n" + "\n".join(defs))
 
     idf = invention_disclosure_service.get_invention_disclosure(db, patent_id)
     if idf is not None:
         for label, val in (
-            ("Bilinen teknik ve problemler", getattr(idf, "prior_art_and_problems", "")),
-            ("En yakın önceki patentler", getattr(idf, "closest_prior_patents", "")),
-            ("Yenilikçi özellikler", getattr(idf, "novel_features", "")),
+            ("Known prior art and problems", getattr(idf, "prior_art_and_problems", "")),
+            ("Closest prior patents", getattr(idf, "closest_prior_patents", "")),
+            ("Novel features", getattr(idf, "novel_features", "")),
         ):
             if val and val.strip():
                 context_parts.append(f"{label}: {val.strip()}")
@@ -199,39 +159,6 @@ def _build_context(
 
 
 # ---------------------------------------------------------------------------
-# Prompting
-# ---------------------------------------------------------------------------
-
-_SYSTEM_BASE = (
-    "Sen deneyimli bir Türk patent vekilisin. TÜRKPATENT (Türk Patent ve "
-    "Marka Kurumu) formatında bir patent başvuru tarifnamesi hazırlıyorsun.\n\n"
-    "Sana buluşa ait istemler ve destekleyici bağlam bilgisi verilecek. "
-    'Görevin yalnızca tarifnamenin "{title}" bölümünü Türkçe yazmaktır.\n\n'
-    "KURALLAR:\n"
-    "- Yalnızca verilen bilgilere dayan; bilgi, sayı veya özellik uydurma.\n"
-    "- Resmi, teknik ve nesnel bir patent dili kullan.\n"
-    "- Metnin tamamını YALNIZCA Türkçe yaz; başka hiçbir dil veya alfabe kullanma.\n"
-    "- Bölüm başlığını tekrar yazma; sadece bölümün metnini üret.\n"
-    "- Madde imleri kullanma; akıcı paragraflar yaz.\n"
-    '- Çıktıyı SADECE şu JSON nesnesi olarak ver: {{"icerik": "..."}}\n'
-    "- JSON dışında açıklama, markdown veya kod bloğu yazma.\n\n"
-    "BÖLÜM TALİMATI ({title}):\n{instruction}"
-)
-
-
-def _build_user_prompt(ctx: _DraftContext) -> str:
-    parts = [f"BULUŞ BAŞLIĞI: {ctx.patent_name or '(belirtilmemiş)'}"]
-    if ctx.domain:
-        parts.append(f"TEKNİK ALAN: {ctx.domain}")
-    if ctx.invention_context:
-        parts.append(f"BULUŞ BAĞLAMI: {ctx.invention_context}")
-    parts.append("\nİSTEMLER VE UNSURLAR:\n" + (ctx.claims_text or "(istem girilmemiş)"))
-    if ctx.extra_context:
-        parts.append("\nEK BAĞLAM:\n" + ctx.extra_context)
-    return "\n".join(parts)
-
-
-# ---------------------------------------------------------------------------
 # Reasoning-model output cleanup
 # ---------------------------------------------------------------------------
 
@@ -243,8 +170,8 @@ def _strip_reasoning(text: str) -> str:
 
     DeepSeek-R1 / other reasoning models emit a <think>...</think> block
     before the answer. The router's JSON parser usually isolates the answer
-    object on its own, but this is a cheap belt-and-braces pass in case
-    reasoning text ended up inside the JSON value.
+    object, but this is a cheap belt-and-braces pass in case reasoning text
+    ended up inside the JSON value.
     """
     if not text:
         return ""
@@ -255,38 +182,113 @@ def _strip_reasoning(text: str) -> str:
     return re.sub(r"</?think>", "", text, flags=re.IGNORECASE).strip()
 
 
-def _generate_section(section: _Section, user_prompt: str, attempts: int = 1) -> str:
-    """Run the LLM call for one section, with up to ``attempts`` tries.
+# ---------------------------------------------------------------------------
+# Prompts (English output)
+# ---------------------------------------------------------------------------
 
-    A draft is many sequential calls, so a transient backend blip (an
-    ngrok hiccup, a momentary timeout) mid-run should not lose a whole
-    section — non-first sections are given a retry. Raises the last error
-    if every attempt fails.
-    """
-    system_prompt = _SYSTEM_BASE.format(
-        title=section.title, instruction=section.instruction
+_DESCRIPTION_SYSTEM = (
+    "You are an experienced patent attorney drafting the DESCRIPTION part "
+    "of a patent specification in formal, technical English.\n\n"
+    "You are given the invention's claims and supporting context. Write a "
+    "complete, well-structured patent description that covers, in order:\n"
+    "  - the technical field of the invention;\n"
+    "  - the background art and the problems/limitations of existing "
+    "solutions;\n"
+    "  - a summary of the invention, its objective and the advantages it "
+    "provides;\n"
+    "  - a detailed description of the invention: every element, how the "
+    "elements relate to one another, and how the invention works.\n\n"
+    "RULES:\n"
+    "- Rely ONLY on the information provided; do not invent facts, numbers "
+    "or features.\n"
+    "- Write in formal, objective, technical patent English. Output ENGLISH "
+    "ONLY — no other language or alphabet.\n"
+    "- Preserve every reference numeral exactly as given (e.g. \"rotating "
+    "rod (4)\").\n"
+    "- Use flowing paragraphs separated by blank lines. No bullet points, "
+    "no markdown, no headings.\n"
+    "- Do NOT reproduce the claim text verbatim; the claims are a separate "
+    "part of the document.\n"
+    '- Output ONLY this JSON object: {"content": "<the description text>"}\n'
+    "- No explanation, markdown or code fences outside the JSON."
+)
+
+_ABSTRACT_SYSTEM = (
+    "You are an experienced patent attorney writing the ABSTRACT of a "
+    "patent specification in formal, technical English.\n\n"
+    "You are given the full DESCRIPTION of the invention. Write a single "
+    "concise paragraph that summarises the invention described.\n\n"
+    "RULES:\n"
+    "- The abstract MUST be consistent with the description and only "
+    "summarise it; introduce nothing new.\n"
+    "- One paragraph, about 100-150 words.\n"
+    "- Formal, objective, technical patent English. Output ENGLISH ONLY.\n"
+    "- No bullet points, no markdown, no headings.\n"
+    '- Output ONLY this JSON object: {"content": "<the abstract text>"}\n'
+    "- No explanation, markdown or code fences outside the JSON."
+)
+
+
+def _description_user_prompt(ctx: _DraftContext) -> str:
+    parts = [f"INVENTION TITLE: {ctx.patent_name or '(not specified)'}"]
+    if ctx.domain:
+        parts.append(f"TECHNICAL DOMAIN: {ctx.domain}")
+    if ctx.invention_context:
+        parts.append(f"INVENTION CONTEXT: {ctx.invention_context}")
+    parts.append(
+        "\nCLAIMS AND ELEMENTS:\n" + (ctx.claims_text or "(no claims entered)")
     )
-    last_exc: Exception = LLMResponseError("LLM çağrısı yapılamadı.")
+    if ctx.extra_context:
+        parts.append("\nADDITIONAL CONTEXT:\n" + ctx.extra_context)
+    return "\n".join(parts)
+
+
+def _abstract_user_prompt(ctx: _DraftContext, description_body: str) -> str:
+    return (
+        f"INVENTION TITLE: {ctx.patent_name or '(not specified)'}\n\n"
+        "FULL DESCRIPTION OF THE INVENTION:\n"
+        + _trim(description_body, _DESCRIPTION_FEED_CAP)
+    )
+
+
+# ---------------------------------------------------------------------------
+# LLM section call
+# ---------------------------------------------------------------------------
+
+def _call_section(
+    system_prompt: str,
+    user_prompt: str,
+    max_new_tokens: int,
+    attempts: int = 1,
+) -> str:
+    """Run one LLM call and return the 'content' string, with up to
+    ``attempts`` tries. Raises the last error if every attempt fails."""
+    last_exc: Exception = LLMResponseError("LLM call could not be made.")
     for i in range(attempts):
         try:
             parsed = llm_router.generate_json(
                 user_prompt=user_prompt,
                 system_prompt=system_prompt,
-                temperature=_SECTION_TEMPERATURE,
-                max_new_tokens=_SECTION_MAX_TOKENS,
+                temperature=_TEMPERATURE,
+                max_new_tokens=max_new_tokens,
             )
-            body = parsed.get("icerik") or parsed.get("content") or parsed.get("text") or ""
+            body = (
+                parsed.get("content")
+                or parsed.get("icerik")
+                or parsed.get("text")
+                or ""
+            )
             if not isinstance(body, str):
                 body = str(body)
             body = _strip_reasoning(body)
             if body:
                 return body
-            last_exc = LLMResponseError("LLM boş içerik döndürdü.")
+            last_exc = LLMResponseError("LLM returned empty content.")
         except (LLMConnectionError, LLMResponseError, LLMParseError) as exc:
             last_exc = exc
             logger.warning(
-                "[COMPOSER] section '%s' attempt %d/%d failed: %s",
-                section.key, i + 1, attempts, exc,
+                "[COMPOSER] section attempt %d/%d failed: %s",
+                i + 1, attempts, exc,
             )
     raise last_exc
 
@@ -301,7 +303,7 @@ def _render_html(sections: list[dict]) -> str:
     for s in sections:
         out.append(f"<h4>{s['number']}. {html.escape(s['title'])}</h4>")
         body = s["body"] or ""
-        if s["key"] == "istemler":
+        if s["key"] == "claims":
             # One paragraph per claim line.
             paras = [ln.strip() for ln in body.splitlines() if ln.strip()]
         else:
@@ -322,16 +324,16 @@ def generate_draft(
     patent_id: int,
     claims_text: str | None = None,
 ) -> dict | None:
-    """Generate the full patent draft for a project.
+    """Generate the 3-part patent draft (Description, Claims, Abstract).
 
     Returns:
-        None                       -> patent not found
-        {"error": "no_claims"}     -> nothing to draft from
+        None                     -> patent not found
+        {"error": "no_claims"}   -> nothing to draft from
         {patent_id, backend, sections, draft_html, warnings} -> success
 
     Raises:
-        LLMConnectionError -> the LLM backend was unreachable for the very
-                              first section (fast feedback; nothing usable).
+        LLMConnectionError -> the LLM backend was unreachable while writing
+                              the Description (fast feedback; nothing usable).
     """
     ctx = _build_context(db, patent_id, claims_text)
     if ctx is None:
@@ -343,52 +345,82 @@ def generate_draft(
     if not has_claims:
         return {"error": "no_claims"}
 
-    user_prompt = _build_user_prompt(ctx)
     backend = llm_router.active_backend()
-    logger.info("[COMPOSER] patent=%s backend=%s — generating draft", patent_id, backend)
+    logger.info(
+        "[COMPOSER] patent=%s backend=%s — generating 3-part draft",
+        patent_id, backend,
+    )
 
     sections: list[dict] = []
     warnings: list[str] = []
 
-    for idx, spec in enumerate(_LLM_SECTIONS):
-        number = len(sections) + 1
-        # First section: a single try so an unreachable backend fails fast.
-        # Later sections: one retry to ride out transient mid-run blips.
-        attempts = 1 if idx == 0 else 2
-        try:
-            body = _generate_section(spec, user_prompt, attempts=attempts)
-        except LLMConnectionError:
-            # Unreachable on the first section -> abort fast, nothing usable.
-            if idx == 0:
-                raise
-            body = ""
-            warnings.append(f"{spec.title}: LLM yanıt vermedi.")
-        except (LLMResponseError, LLMParseError) as exc:
-            logger.warning("[COMPOSER] section '%s' failed: %s", spec.key, exc)
-            body = ""
-            warnings.append(f"{spec.title}: üretilemedi ({type(exc).__name__}).")
+    # --- 1. Description (LLM) ---------------------------------------------
+    # Generated first; the Abstract is derived from it. An unreachable
+    # backend here aborts fast — without a description there is nothing
+    # usable to build the rest of the draft from.
+    try:
+        description_body = _call_section(
+            _DESCRIPTION_SYSTEM,
+            _description_user_prompt(ctx),
+            _DESCRIPTION_MAX_TOKENS,
+            attempts=1,
+        )
+    except LLMConnectionError:
+        raise
+    except (LLMResponseError, LLMParseError) as exc:
+        logger.warning("[COMPOSER] description failed: %s", exc)
+        description_body = ""
+        warnings.append(
+            f"Description: could not be generated ({type(exc).__name__})."
+        )
+    sections.append({
+        "number": 1,
+        "key": "description",
+        "title": "Description",
+        "body": description_body.strip() or _PLACEHOLDER,
+        "generated": bool(description_body.strip()),
+    })
 
-        generated = bool(body.strip())
-        sections.append({
-            "number": number,
-            "key": spec.key,
-            "title": spec.title,
-            "body": body.strip() if generated else _PLACEHOLDER,
-            "generated": generated,
-        })
-
-    # İstemler — deterministic, straight from the saved claims.
-    istemler_body = _format_claims(ctx.db_claims)
-    if not istemler_body.strip() or "(metin girilmemiş)" in istemler_body:
+    # --- 2. Claims (deterministic) ----------------------------------------
+    # Copied verbatim from the saved claims — the wording is never altered.
+    claims_body = _format_claims(ctx.db_claims)
+    if not claims_body.strip() or "(no text entered)" in claims_body:
         # Saved claims have no text -> fall back to the composer textarea.
         if ctx.claims_text.strip():
-            istemler_body = ctx.claims_text
+            claims_body = ctx.claims_text
     sections.append({
-        "number": len(sections) + 1,
-        "key": "istemler",
-        "title": "İstemler",
-        "body": istemler_body.strip() or "(İstem girilmemiş)",
+        "number": 2,
+        "key": "claims",
+        "title": "Claims",
+        "body": claims_body.strip() or "(no claims entered)",
         "generated": True,
+    })
+
+    # --- 3. Abstract (LLM, summarising the Description) -------------------
+    abstract_body = ""
+    if description_body.strip():
+        try:
+            abstract_body = _call_section(
+                _ABSTRACT_SYSTEM,
+                _abstract_user_prompt(ctx, description_body),
+                _ABSTRACT_MAX_TOKENS,
+                attempts=2,
+            )
+        except (LLMConnectionError, LLMResponseError, LLMParseError) as exc:
+            logger.warning("[COMPOSER] abstract failed: %s", exc)
+            warnings.append(
+                f"Abstract: could not be generated ({type(exc).__name__})."
+            )
+    else:
+        warnings.append(
+            "Abstract: skipped because the Description was not generated."
+        )
+    sections.append({
+        "number": 3,
+        "key": "abstract",
+        "title": "Abstract",
+        "body": abstract_body.strip() or _PLACEHOLDER,
+        "generated": bool(abstract_body.strip()),
     })
 
     draft_html = _render_html(sections)

@@ -1,6 +1,15 @@
 """Schemas for the Patent Draft Composer.
 
 Spec: docs/patent_draft_composer.md
+
+The composer returns a patent file with three parts, in this order:
+  1. Description -- LLM-written, English
+  2. Claims      -- deterministic, copied verbatim from the saved claims
+  3. Abstract    -- LLM-written, English, summarises the Description
+
+Each part is one ``DraftSection``; ``sections`` therefore holds three
+items. The shape is intentionally section-agnostic so the part list can
+evolve without a schema change.
 """
 
 from pydantic import BaseModel
@@ -13,9 +22,9 @@ class DraftGenerateRequest(BaseModel):
 
 
 class DraftSection(BaseModel):
-    number: int
-    key: str
-    title: str
+    number: int                # 1=Description, 2=Claims, 3=Abstract
+    key: str                   # "description" | "claims" | "abstract"
+    title: str                 # "Description" | "Claims" | "Abstract"
     body: str
     # True when the section text came from the LLM (or is the deterministic
     # claims section); False when it is a "could not generate" placeholder.
