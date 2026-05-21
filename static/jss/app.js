@@ -968,26 +968,35 @@ function openComposer() {
 
 async function generateDraft() {
   const btn = document.getElementById('btnGenerateDraft');
-  btn.innerHTML = '<span class="spinner"></span> Generating…'; btn.disabled = true;
-  const ct = document.getElementById('composerClaimsInput').value;
-  let d = '<h4>1. Title</h4><p>' + esc(document.getElementById('navPatentName').textContent || 'Patent') + '</p>';
-  d += '<h4>2. Technical Field</h4><p>The present invention relates to ' + esc(_context || 'the described technical field') + '.</p>';
-  d += '<h4>3. Element Definitions</h4>';
-  _claims.forEach(cl => { (_claimElements[cl.claim_id] || []).forEach(el => { if (el.definition_text) d += '<p><strong>' + esc(el.element_name) + '</strong>: ' + esc(el.definition_text) + '</p>'; }); });
-  d += '<h4>4. Claims</h4><pre style="white-space:pre-wrap;color:var(--text-secondary)">' + esc(ct) + '</pre>';
-  await new Promise(r => setTimeout(r, 400));
-  _composerDraft = d;
-  document.getElementById('composerDraftOutput').innerHTML = d;
-  // Persist on the patent so the draft survives reload/restart.
-  if (_patentId) {
-    try {
-      await api('/patents/' + _patentId, {
-        method: 'PATCH',
-        body: JSON.stringify({ patent_draft: d }),
-      });
-    } catch (e) { console.warn('save patent_draft failed:', e.message); }
+  const out = document.getElementById('composerDraftOutput');
+  if (!_patentId) { alert('Önce bir proje açın.'); return; }
+
+  btn.innerHTML = '<span class="spinner"></span> Üretiliyor…'; btn.disabled = true;
+  out.innerHTML = '<p style="color:var(--text-muted)">Taslak üretiliyor… Bölümler ' +
+    'tek tek LLM ile yazılıyor, modele göre birkaç dakika sürebilir.</p>';
+
+  try {
+    // Backend takes the (editable) claims text, assembles a full Turkish
+    // patent draft section by section, and persists it as patent_draft.
+    const res = await api('/patents/' + _patentId + '/draft/generate', {
+      method: 'POST',
+      body: JSON.stringify({
+        claims_text: document.getElementById('composerClaimsInput').value,
+      }),
+    });
+    _composerDraft = res.draft_html || '';
+    out.innerHTML = _composerDraft ||
+      '<p style="color:var(--text-muted)">Taslak boş döndü.</p>';
+    if (res.warnings && res.warnings.length) {
+      out.innerHTML += '<div style="margin-top:14px;padding:8px 11px;border:1px solid ' +
+        'var(--border);border-radius:6px;color:var(--text-muted);font-size:12px">⚠ ' +
+        res.warnings.map(esc).join('<br>') + '</div>';
+    }
+  } catch (e) {
+    out.innerHTML = '<p style="color:#ff8a8a">Taslak üretilemedi: ' + esc(e.message) + '</p>';
+  } finally {
+    btn.innerHTML = '⚡ Generate Draft'; btn.disabled = false;
   }
-  btn.innerHTML = '⚡ Generate Draft'; btn.disabled = false;
 }
 function backToEditor() { showPage('page-editor'); }
 

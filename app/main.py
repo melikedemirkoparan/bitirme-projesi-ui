@@ -13,6 +13,7 @@ from app.routes.inventor_qa import router as inventor_qa_router
 from app.routes.invention_disclosure import router as invention_disclosure_router
 from app.routes.research_report import router as research_report_router
 from app.routes.assistant import router as assistant_router
+from app.routes.draft import router as draft_router
 
 app = FastAPI(title="Patent Drafting Tool")
 
@@ -36,6 +37,7 @@ app.include_router(inventor_qa_router)
 app.include_router(invention_disclosure_router)
 app.include_router(research_report_router)
 app.include_router(assistant_router)
+app.include_router(draft_router)
 
 # Serve static frontend files (JS, CSS, images)
 app.mount("/static", StaticFiles(directory="static"), name="static")
