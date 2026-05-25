@@ -1,18 +1,21 @@
 """
-Shared faithfulness + coverage layer for the document assistant.
+Secondary source-grounding evaluator for the document assistant.
 
-Two complementary checks, exposed as one combined call so each pattern pays
-only one LLM round-trip:
+This module implements a claim-level verification layer. It evaluates:
 
-  - Faithfulness: are all claims in the answer supported by the source?
-                  (catches hallucinations and unsupported assertions)
-  - Coverage:     does the answer cover all distinct facts from the source
-                  that the question asked for?
-                  (catches incompleteness and dropped facts)
+1. Faithfulness / factual consistency: whether each factual claim in the
+   generated answer is supported by the source document.
+2. Coverage / completeness: whether the answer omits relevant source facts
+   required by the task.
 
-Used by P1 to gate support_level and to surface missing facts. P2 is fully
-deterministic so faithfulness is guaranteed by construction. P3 ranking
-already produces verbatim excerpts, so this layer is optional there.
+The evaluator is used as a post-generation guardrail. It does not generate
+new technical content and does not assess legal patentability.
+
+Applied to P1 to gate support_level and to surface missing facts.
+P2 uses deterministic excerpt verification for quoted evidence, but its
+verdict reasoning may still be LLM-assisted. Therefore, this evaluator is
+also applied to P2 when stricter verification is required.
+P3 ranking already produces verbatim excerpts, so this layer is optional there.
 """
 
 from __future__ import annotations
@@ -28,25 +31,49 @@ from app.generation.llm_client import (
 )
 
 
+# ---------------------------------------------------------------------------
+# Type aliases — kept as-is for backwards compatibility with callers that
+# import these names directly.
+# ---------------------------------------------------------------------------
+
 FaithfulnessVerdict = Literal["explicit", "inferred", "unsupported"]
 CoverageVerdict = Literal["complete", "partial", "missing_critical"]
 
 
 @dataclass
 class FaithfulnessResult:
-    faithfulness: FaithfulnessVerdict
-    coverage: CoverageVerdict
+    # Core evaluation verdicts
+    faithfulness: FaithfulnessVerdict   # factual consistency of the answer
+    coverage: CoverageVerdict           # completeness relative to the source
+
+    # Reasoning strings for display / logging
     faithfulness_reasoning: str = ""
     coverage_reasoning: str = ""
     missing_facts: list[str] = field(default_factory=list)
 
+    # Evaluator failure flag — True when the LLM judge itself could not run
+    # (connection error, timeout, bad JSON).  Must be distinguished from a
+    # genuine "unsupported" verdict about the answer content.
+    check_failed: bool = False
+
+    # Evaluation metadata — useful for academic reporting and audit trails
+    evaluator_name: str = "llm_faithfulness_coverage_judge"
+    evaluation_method: str = "claim_level_source_grounding"
+
+
+# ---------------------------------------------------------------------------
+# Evaluator prompts
+# ---------------------------------------------------------------------------
 
 _SYSTEM = (
-    "You are a faithfulness and coverage judge for a patent drafting assistant. "
+    "You are a source-grounding evaluator for a patent document assistant. "
+    "Your role is to verify whether a generated answer is factually consistent "
+    "with the provided source and whether it covers all relevant source facts. "
     "Output valid JSON only. No markdown, no explanation."
 )
 
-_USER = """You judge an answer against a source text on TWO independent dimensions.
+_USER = """You are evaluating an answer produced by a patent document assistant.
+Your evaluation must be source-grounded and claim-level.
 
 [SOURCE]
 {source}
@@ -60,55 +87,79 @@ _USER = """You judge an answer against a source text on TWO independent dimensio
 {question_context}
 [/QUESTION CONTEXT]
 
-Dimension 1 — Faithfulness (is everything in the answer supported by the source?):
-- "explicit": every factual claim in the answer is directly and clearly stated in the source.
-- "inferred": the answer is a reasonable interpretation of the source, but some claims are not directly stated.
-- "unsupported": the answer contains a claim not present in the source, contradicts the source, or invents details.
+Step 1 — Decompose the answer into factual claims.
+A factual claim is any statement about a component, mechanism, problem, cause, effect, or proposed solution.
 
-Dimension 2 — Coverage (does the answer cover everything the source provides for the question?):
-- "complete": every distinct relevant fact from the source is reflected in the answer.
-- "partial": minor secondary details are missing, but the main relevant facts are covered.
-- "missing_critical": at least one distinct relevant fact from the source is absent from the answer.
+Step 2 — Faithfulness / factual consistency.
+For each factual claim, decide whether it is:
+- directly supported by the source,
+- reasonably inferable from the source (all supporting facts are present, but require connecting),
+- unsupported or contradicted by the source.
 
-Output JSON:
+Overall faithfulness verdict:
+- "explicit": all factual claims are directly supported by the source.
+- "inferred": all factual claims are supported, but at least one requires connecting multiple source statements.
+- "unsupported": at least one factual claim is not supported or contradicts the source.
+
+Step 3 — Coverage / completeness.
+Determine whether the answer includes all source facts relevant to the question context.
+
+Overall coverage verdict:
+- "complete": all relevant source facts are covered.
+- "partial": only minor secondary facts are missing.
+- "missing_critical": at least one important problem, mechanism, consequence, or solution detail is missing.
+
+Return JSON:
 {{
   "faithfulness": "explicit" or "inferred" or "unsupported",
   "coverage": "complete" or "partial" or "missing_critical",
-  "faithfulness_reasoning": "one short sentence: which claims are or are not supported",
-  "coverage_reasoning": "one short sentence: what is covered or what is missing",
-  "missing_facts": ["short description of each distinct relevant fact from the source not present in the answer"]
+  "faithfulness_reasoning": "short explanation of support status across the factual claims",
+  "coverage_reasoning": "short explanation of completeness status",
+  "missing_facts": ["short description of each relevant source fact absent from the answer"]
 }}
 
 Rules:
 - Use ONLY [SOURCE]. Do not use outside knowledge.
-- Faithfulness and coverage are independent — judge each separately.
-- A fact is "missing" only if it is relevant to the question context AND not reflected in the answer in any form.
-- Keep missing_facts short — one sentence per item, focused on the missing fact itself."""
+- Do not evaluate legal patentability.
+- Do not add technical facts not present in the source.
+- Treat terminology differences as acceptable only if the meaning is unchanged.
+- A fact is "missing" only if it is relevant to the question context AND absent from the answer in any form.
+- Keep reasoning concise — one short sentence per field."""
 
+
+# ---------------------------------------------------------------------------
+# Public evaluation interface
+# ---------------------------------------------------------------------------
 
 def check(
     source: str,
     answer: str,
     question_context: str = "core technical problem and proposed solution",
 ) -> FaithfulnessResult:
-    """Run faithfulness and coverage check in a single LLM call.
+    """Run the claim-level source-grounding evaluation in a single LLM call.
 
-    Returns a FaithfulnessResult. On any LLM failure or empty input, returns
-    an "unsupported"/"missing_critical" result so callers can fail safe.
+    Returns a FaithfulnessResult carrying factual consistency and completeness
+    verdicts, reasoning, and metadata.
+
+    On evaluator failure (LLM error, empty input), check_failed=True is set
+    so callers can distinguish an evaluator failure from a genuine
+    "unsupported" verdict about the answer content.
     """
     if not source or not source.strip():
         return FaithfulnessResult(
             faithfulness="unsupported",
             coverage="missing_critical",
-            faithfulness_reasoning="Empty source text.",
-            coverage_reasoning="Empty source text.",
+            faithfulness_reasoning="Empty source text — evaluation aborted.",
+            coverage_reasoning="Empty source text — evaluation aborted.",
+            check_failed=True,
         )
     if not answer or not answer.strip():
         return FaithfulnessResult(
             faithfulness="unsupported",
             coverage="missing_critical",
-            faithfulness_reasoning="Empty answer.",
-            coverage_reasoning="Empty answer.",
+            faithfulness_reasoning="Empty answer — evaluation aborted.",
+            coverage_reasoning="Empty answer — evaluation aborted.",
+            check_failed=True,
         )
 
     try:
@@ -125,8 +176,9 @@ def check(
         return FaithfulnessResult(
             faithfulness="unsupported",
             coverage="missing_critical",
-            faithfulness_reasoning="Faithfulness/coverage check could not be completed.",
-            coverage_reasoning="Faithfulness/coverage check could not be completed.",
+            faithfulness_reasoning="Evaluator LLM call failed — could not complete verification.",
+            coverage_reasoning="Evaluator LLM call failed — could not complete verification.",
+            check_failed=True,
         )
 
     f_verdict = raw.get("faithfulness", "unsupported")
@@ -156,11 +208,15 @@ def check(
     )
 
 
-# Backwards-compatible thin wrapper for callers that only need faithfulness.
-def check_faithfulness(source: str, answer: str) -> tuple[FaithfulnessVerdict, str]:
-    """Faithfulness-only convenience wrapper.
+# ---------------------------------------------------------------------------
+# Backwards-compatible thin wrapper
+# ---------------------------------------------------------------------------
 
-    Returns (verdict, reasoning). Prefer `check()` to also get coverage.
+def check_faithfulness(source: str, answer: str) -> tuple[FaithfulnessVerdict, str]:
+    """Factual-consistency-only convenience wrapper.
+
+    Returns (verdict, reasoning). Prefer check() to also obtain coverage
+    and evaluation metadata.
     """
     result = check(source, answer)
     return (result.faithfulness, result.faithfulness_reasoning)

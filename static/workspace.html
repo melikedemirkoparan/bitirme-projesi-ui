@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Claim Workspace — Patent Drafting Tool</title>
-  <link rel="stylesheet" href="/static/cs/style.css">
+  <link rel="stylesheet" href="/static/cs/style.css?v=11">
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body class="workspace-page">
@@ -483,9 +483,15 @@
       <button class="assistant-mode-btn" data-mode="P3" onclick="selectAssistantMode('P3')">Element Lookup</button>
     </div>
 
-    <div class="assistant-term-row" id="assistantTermRow" style="display:none;">
+    <div class="assistant-term-row" id="assistantTermRow">
       <label class="form-label" for="assistantTermInput">Element / term</label>
       <input type="text" id="assistantTermInput" placeholder="e.g. locking nut, hub, support arm">
+    </div>
+
+    <div class="assistant-elements-row" id="assistantElementsRow">
+      <label class="form-label" for="assistantElementsInput">Invention elements (numbered list)</label>
+      <textarea id="assistantElementsInput" rows="6"
+        placeholder="1. Four-bar mechanism for sway brace positioning&#10;2. Vertical-plane movement of sway brace shoes&#10;3. Mechanical clamp for fixation"></textarea>
     </div>
 
     <div class="assistant-ask-row">
@@ -504,6 +510,6 @@
     </div>
   </aside>
 
-  <script src="/static/jss/workspace.js?v=9"></script>
+  <script src="/static/jss/workspace.js?v=11"></script>
 </body>
 </html>

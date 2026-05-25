@@ -1629,7 +1629,9 @@ function selectAssistantMode(mode) {
   document.querySelectorAll('.assistant-mode-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.mode === mode);
   });
-  document.getElementById('assistantTermRow').style.display = (mode === 'P3') ? 'block' : 'none';
+  // Set data-mode on the drawer; CSS rules handle show/hide of input rows.
+  const drawer = document.getElementById('assistantDrawer');
+  if (drawer) drawer.dataset.mode = mode;
 
   // Show this mode's cached result (empty string = blank panel = unasked).
   document.getElementById('assistantResult').innerHTML = _assistantResultByMode[mode] || '';
@@ -1650,6 +1652,14 @@ async function askAssistant() {
   }
 
   const body = { pattern_id: assistantMode };
+  if (assistantMode === 'P2') {
+    const elements = (document.getElementById('assistantElementsInput').value || '').trim();
+    if (!elements) {
+      _renderAssistantError('Please enter the invention elements in numbered list format (1. … 2. … 3. …).');
+      return;
+    }
+    body.elements = elements;
+  }
   if (assistantMode === 'P3') {
     const term = (document.getElementById('assistantTermInput').value || '').trim();
     if (!term) {
@@ -1726,10 +1736,10 @@ function _renderAssistantResult(data) {
   }
 
   if (data.pattern_id === 'P2' && data.claim_structure) {
-    parts.push(_renderClaimStructure(data.claim_structure));
-  }
-
-  if (Array.isArray(data.evidence) && data.evidence.length) {
+    const evidenceById = {};
+    (data.evidence || []).forEach(ev => { evidenceById[ev.evidence_id] = ev; });
+    parts.push(_renderClaimStructure(data.claim_structure, evidenceById));
+  } else if (Array.isArray(data.evidence) && data.evidence.length) {
     parts.push(_renderEvidence(data.evidence, data.pattern_id));
   }
 
@@ -1741,16 +1751,17 @@ function _renderAssistantResult(data) {
   _assistantResultByMode[cacheKey] = html;
 }
 
-function _renderClaimStructure(cs) {
+function _renderClaimStructure(cs, evidenceById) {
+  evidenceById = evidenceById || {};
   const out = ['<div class="assistant-cs-section">'];
 
   if (Array.isArray(cs.independent_candidates) && cs.independent_candidates.length) {
     out.push('<h5>Independent claim candidates</h5>');
-    cs.independent_candidates.forEach(c => out.push(_renderCsCard(c)));
+    cs.independent_candidates.forEach(c => out.push(_renderCsCard(c, false, evidenceById)));
   }
   if (Array.isArray(cs.dependent_candidates) && cs.dependent_candidates.length) {
     out.push('<h5>Dependent claim candidates</h5>');
-    cs.dependent_candidates.forEach(c => out.push(_renderCsCard(c, true)));
+    cs.dependent_candidates.forEach(c => out.push(_renderCsCard(c, true, evidenceById)));
   }
   if (Array.isArray(cs.cautions) && cs.cautions.length) {
     out.push('<h5>Drafting cautions</h5>');
@@ -1763,7 +1774,8 @@ function _renderClaimStructure(cs) {
   return out.join('');
 }
 
-function _renderCsCard(c, isDependent) {
+function _renderCsCard(c, isDependent, evidenceById) {
+  evidenceById = evidenceById || {};
   const features = (c.features || []).map(f => '<li>' + _assistantEsc(f) + '</li>').join('');
   const dep = isDependent && c.depends_on
     ? '<div class="assistant-cs-dep">depends on: ' + _assistantEsc(c.depends_on) + '</div>' : '';
@@ -1771,12 +1783,34 @@ function _renderCsCard(c, isDependent) {
     ? '<div class="assistant-cs-support">' + _supportBadge(c.support_level) +
       (c.support_note ? ' <span class="assistant-cs-note">' + _assistantEsc(c.support_note) + '</span>' : '') +
       '</div>' : '';
+
+  // Inline evidence — verified excerpts linked to this element
+  let evidenceHtml = '';
+  const eids = Array.isArray(c.evidence_ids) ? c.evidence_ids : [];
+  const evCards = eids.map(id => evidenceById[id]).filter(Boolean);
+  if (evCards.length) {
+    const items = evCards.map(ev =>
+      '<div class="assistant-cs-evidence-item">' +
+        '<span class="assistant-cs-evidence-eid">' + _assistantEsc(ev.evidence_id) + '</span>' +
+        '<span class="assistant-cs-evidence-text">"' + _assistantEsc(ev.excerpt) + '"</span>' +
+      '</div>'
+    ).join('');
+    evidenceHtml = '<div class="assistant-cs-evidence">' +
+      '<div class="assistant-cs-evidence-label">Source</div>' +
+      items + '</div>';
+  }
+
+  const pac = c.prior_art_comparison
+    ? '<div class="assistant-cs-pac">' + _assistantEsc(c.prior_art_comparison) + '</div>' : '';
+
   return '<div class="assistant-cs-card">' +
     '<div class="assistant-cs-label">' + _assistantEsc(c.label || '') + '</div>' +
     dep +
     (features ? '<ul class="assistant-cs-features">' + features + '</ul>' : '') +
     (c.reason ? '<div class="assistant-cs-reason">' + _assistantEsc(c.reason) + '</div>' : '') +
+    pac +
     sup +
+    evidenceHtml +
     '</div>';
 }
 

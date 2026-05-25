@@ -7,7 +7,8 @@ from pydantic import BaseModel
 
 class AssistantRequest(BaseModel):
     pattern_id: Literal["P1", "P2", "P3"]
-    term: str | None = None  # required only for P3
+    term: str | None = None      # required only for P3
+    elements: str | None = None  # required only for P2 — user-provided numbered list
 
 
 class EvidenceCard(BaseModel):
@@ -23,8 +24,10 @@ class IndependentCandidate(BaseModel):
     label: str
     features: list[str]
     reason: str
+    prior_art_comparison: str = ""  # "Considering DOC_ID, which discloses X, this element…"
     support_level: Literal["explicit", "inferred"] | None = None
     support_note: str | None = None
+    evidence_ids: list[str] = []
 
 
 class DependentCandidate(BaseModel):
@@ -32,8 +35,10 @@ class DependentCandidate(BaseModel):
     depends_on: str
     features: list[str]
     reason: str
+    prior_art_comparison: str = ""  # "Considering DOC_ID, which discloses X, this element…"
     support_level: Literal["explicit", "inferred"] | None = None
     support_note: str | None = None
+    evidence_ids: list[str] = []
 
 
 class ClaimStructure(BaseModel):
