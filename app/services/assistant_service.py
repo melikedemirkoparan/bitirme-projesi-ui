@@ -224,19 +224,38 @@ def _run_p1(patent_id: int, idf, rr) -> AssistantResponse:
 # P2 — Patentability Assessment (LLM-judged)
 #
 # Pipeline:
-#   1. Pull the numbered element list from the executive summary (deterministic
-#      regex — robust enough and avoids spending an LLM call on parsing).
-#   2. Send the element list + element_patent_analysis to the local LLM and
-#      ask for a per-element verdict, drafting reason, and a verbatim
-#      supporting excerpt copied from the analysis.
-#   3. Verify each excerpt is an exact substring of element_patent_analysis.
-#      Excerpts that don't verify drop the element to a caution — this is the
-#      faithfulness guard for hallucinated quotes.
-#   4. Build claim_structure from the verdicts:
-#        novelty + inventive step       → independent_candidate
-#        novelty but no inventive step  → dependent_candidate
-#        no novelty                     → caution
-#        unclear / unverifiable         → caution
+#   1. Parse the user-supplied numbered element list (deterministic regex).
+#   2. Send element list + element_patent_analysis to the LLM.
+#      The prompt validates each element in three sub-steps:
+#        1a. Gibberish check — meaningless names → verdict "unclear".
+#        1b. Name-to-analysis match — element name must share at least one
+#            technical keyword with the corresponding numbered header in the
+#            analysis; mismatch → verdict "unclear".
+#        1c. Passage lookup by element number for valid elements.
+#      Then for each valid element the model assigns:
+#        - verdict: novelty_and_inventive | novelty_only | no_novelty | unclear
+#        - novelty_reasoning + inventive_step_reasoning
+#        - prior_art_comparison (Case A: specific patents named;
+#                                Case B: no prior-art document found;
+#                                Case C: empty)
+#        - support_excerpts: verbatim sentences from the analysis
+#   3. Per-element faithfulness guards (no extra LLM calls for excerpt check):
+#        a. Excerpt verification — each support_excerpt is substring-matched
+#           against the analysis; unverified excerpts are dropped.
+#           Zero verified excerpts → support_level "inferred" (not "explicit").
+#        b. PAC grounding check (one faithfulness.check() call per element
+#           that has a Case A pac) — verifies that the patent numbers and
+#           feature descriptions in prior_art_comparison are supported by the
+#           analysis. "unsupported" → pac removed. "inferred" → card
+#           support_level downgraded to "inferred".
+#   4. All-unclear gate — if every element is "unclear", return insufficient.
+#   5. Overall faithfulness guard (one faithfulness.check() call) — verifies
+#      the verdict summary sentence against the analysis.
+#   6. Build claim_structure from the verdicts:
+#        novelty_and_inventive → independent_candidate
+#        novelty_only          → dependent_candidate
+#        no_novelty            → caution (with pac note)
+#        unclear               → caution
 # ---------------------------------------------------------------------------
 
 _P2_TITLE = "Patentability Assessment"
@@ -244,6 +263,15 @@ _P2_TITLE = "Patentability Assessment"
 # Match "1. Title", "  2. Title" — captures number and title on the same line only.
 # No DOTALL: title is always a single line; multi-paragraph bleed is prevented.
 _ELEMENT_HEADER_RE = re.compile(r"(?:^|\n)\s*(\d+)\.\s+([^\n]+)")
+
+# Detects patent/document numbers in a prior_art_comparison string.
+# Used to decide whether to run the faithfulness grounding check:
+#   Case A pac (contains a patent number) → check both the number and
+#     the feature description attributed to it via faithfulness.check().
+#   Case B pac ("No specific prior-art document…") → skip the check;
+#     running it against the full multi-element analysis would produce
+#     false positives from other elements' patent numbers.
+_PAC_PATENT_NUM_RE = re.compile(r"[A-Z]{2}\d{4,}")
 
 
 def _extract_element_titles(elements_text: str | None) -> list[dict]:
@@ -290,28 +318,65 @@ PATENT TERMINOLOGY:
 
 For EACH numbered element, work through these steps:
 
-Step 1 — Find passages for this element.
-Search [ELEMENT_PATENT_ANALYSIS] for all passages that contain "Element N" where N is
-this element's number (e.g. "Element 1", "Element 2"). The element description from
-[ELEMENTS] is provided so you understand the concept; the primary search key is the
-element number label used in the analysis.
+Step 1 — Pre-validation: reject mismatched or gibberish element names BEFORE any analysis.
+This step is applied PER ELEMENT. If one element fails validation, set its verdict to
+"unclear" and move on to the next element — do NOT stop assessing the remaining elements.
 
-Step 2 — Novelty: does the analysis state whether this element is disclosed in a cited prior-art document?
+Example: if 3 elements are provided and element 2 is gibberish or mismatched, elements
+1 and 3 are still fully assessed; only element 2 gets verdict="unclear".
+
+Sub-step 1a — Gibberish check.
+Is the element name from [ELEMENTS] a coherent technical description? A valid name is a
+meaningful phrase about a component, mechanism, feature, or engineering concept.
+INVALID examples: "eren", "asdfjkl", "blabla", "test123", single personal names,
+random characters, placeholder text, words with no engineering meaning.
+→ If INVALID: set verdict="unclear", novelty_reasoning="Element description is not a
+meaningful technical concept — assessment skipped."
+Skip sub-steps 1b and 1c for this element; continue to the NEXT element.
+
+Sub-step 1b — Name-to-analysis match check.
+[ELEMENT_PATENT_ANALYSIS] contains numbered section headers such as:
+  "1. CHANGING THE SWAY BRACE POSITIONS FOR DIFFERENT AMMUNITION DIAMETERS…"
+  "2. MOVING THE SHOES ONLY IN THE VERTICAL PLANE…"
+Find the header for element number N. Ask: does the provided element name share at least
+one meaningful technical keyword (component, mechanism, action, or engineering term) with
+that header?
+→ If NO shared technical keyword: set verdict="unclear", novelty_reasoning="Provided
+element name does not correspond to Element N in the analysis — check numbering."
+Skip sub-step 1c for this element; continue to the NEXT element.
+→ If YES: continue to sub-step 1c.
+
+Sub-step 1c — Find passages.
+Search [ELEMENT_PATENT_ANALYSIS] for all passages containing "Element N" where N is
+this element's number. Use these passages for Steps 2–6.
+
+Step 2 — Evidence: copy the KEY sentences from the matching passage for this element.
+Select the sentences you will directly use to assign the verdict and write the
+prior_art_comparison. Include:
+  - The novelty verdict sentence.
+  - The inventive step verdict sentence (if present).
+  - The most important sentence describing the relevant prior-art document and what it discloses (if any).
+  - The most important sentence comparing the invention against the prior art (if any).
+Do NOT include sentences about other elements. Each excerpt must be verbatim — character by character, no paraphrase, no shortening.
+
+Step 3 — Novelty: does the matching passage state whether this element is disclosed in a cited prior-art document?
 - "involves novelty" or "no relevant document was found" → novel.
 - "does not involve novelty" or cites a document that discloses it → not novel.
 
-Step 3 — Inventive step: does the analysis state whether this element would have been obvious?
+Step 4 — Inventive step: does the matching passage state whether this element would have been obvious?
 - "involves an inventive step" → has inventive step.
 - "does not involve an inventive step" or "considered obvious to a person skilled in the art" → no inventive step.
 
-Step 4 — Assign verdict:
+Step 5 — Assign verdict:
 - "novelty_and_inventive": analysis concludes BOTH novelty AND inventive step → independent claim candidate.
 - "novelty_only": analysis concludes novelty but NOT inventive step → dependent claim candidate.
 - "no_novelty": analysis concludes the element lacks novelty → cannot be independently claimed.
 - "unclear": the analysis does not contain sufficient information for this element.
 
-Step 5 — Prior-art comparison note.
+Step 6 — Prior-art comparison note.
 Write in your own words — do not copy verbatim. Do not invent details not in the analysis.
+Base this note only on the matching passage for this element and the support_excerpts
+you selected in Step 2.
 
   Case A — One or more prior-art documents ARE named for this element:
     For novel elements (novelty_and_inventive or novelty_only):
@@ -338,14 +403,6 @@ Write in your own words — do not copy verbatim. Do not invent details not in t
   IMPORTANT: If any patent number (e.g. US4620680A) or document ID appears anywhere in the
   passage for this element — even if the element is ultimately found to be novel — use Case A,
   not Case B or C.
-
-Step 6 — Evidence: copy the KEY sentences from [ELEMENT_PATENT_ANALYSIS] that you
-directly used to assign the verdict and write the prior_art_comparison. Include:
-  - The novelty verdict sentence.
-  - The inventive step verdict sentence (if present).
-  - The most important sentence describing the relevant prior-art document and what it discloses (if any).
-  - The most important sentence comparing the invention against the prior art (if any).
-Do NOT include sentences about other elements. Each excerpt must be verbatim — character by character, no paraphrase, no shortening.
 
 Return this JSON:
 {{
@@ -525,6 +582,51 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
             inferred_only = True
             support_level_val = "inferred"
 
+        # ---------------------------------------------------------------------------
+        # PAC grounding check — faithfulness judge evaluates whether the
+        # prior_art_comparison text is actually supported by the analysis.
+        #
+        # Only run when the pac contains a patent/document number (Case A).
+        # Case B pacs ("No specific prior-art document was identified…") are
+        # deterministic paraphrases of the "no relevant document found" phrase
+        # in the analysis; running the faithfulness judge against the full
+        # analysis would produce false positives because it sees patent numbers
+        # from other elements and incorrectly flags the no-doc claim.
+        #
+        # "explicit"    → pac content is directly stated — keep as-is.
+        # "inferred"    → pac is a reasonable synthesis — keep, note the grounding.
+        # "unsupported" → pac is not grounded in the source — remove it entirely
+        #                 to avoid showing hallucinated patent/feature claims.
+        # ---------------------------------------------------------------------------
+        pac_grounding_note = ""
+        if prior_art_comparison and _PAC_PATENT_NUM_RE.search(prior_art_comparison):
+            pac_faith = faithfulness.check(
+                source=analysis_text,
+                answer=prior_art_comparison,
+                question_context=(
+                    f"prior-art documents cited and the features attributed to "
+                    f"them for Element {num} ({name}) in the element-patent analysis"
+                ),
+            )
+            if not pac_faith.check_failed:
+                if pac_faith.faithfulness == "unsupported":
+                    prior_art_comparison = ""
+                    pac_grounding_note = (
+                        f"Prior-art comparison removed — not supported by source: "
+                        f"{pac_faith.faithfulness_reasoning}"
+                    )
+                else:
+                    # "explicit" or "inferred": keep the pac, carry the reasoning forward.
+                    pac_grounding_note = (
+                        f"Prior-art comparison ({pac_faith.faithfulness}): "
+                        f"{pac_faith.faithfulness_reasoning}"
+                    )
+                    # If the PAC is only inferred (synthesized, not verbatim), downgrade
+                    # the card's support_level too — showing "Explicitly Stated" while the
+                    # prior-art comparison is interpretive would be misleading.
+                    if pac_faith.faithfulness == "inferred":
+                        support_level_val = "inferred"
+
         verdicts.append(verdict)
 
         # Build evidence cards from all verified excerpts for this element.
@@ -540,13 +642,18 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
             ))
             element_evidence_ids.append(eid)
 
-        # Support note: verbatim excerpt when available; fallback note when inferred.
+        # Support note: verbatim excerpt (or fallback) + pac grounding note.
         if verified_excerpts:
             support_note = verified_excerpts[0]
         elif inferred_only:
             support_note = "Verdict based on analysis; verbatim excerpt could not be pinpointed — review recommended."
         else:
             support_note = ""
+        if pac_grounding_note:
+            support_note = (
+                (support_note + "\n" + pac_grounding_note).strip()
+                if support_note else pac_grounding_note
+            )
 
         if verdict == "novelty_and_inventive":
             independent.append(IndependentCandidate(
@@ -594,6 +701,18 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
             "The element-patent analysis may not yet contain novelty/inventive-step conclusions.",
         )
 
+    # If every verdict is "unclear" — no candidates, no no_novelty findings —
+    # the input elements were not found in the analysis (e.g. gibberish names,
+    # wrong numbering, or the analysis does not address them at all).
+    # Return insufficient rather than an uninformative all-unclear result.
+    if verdicts and all(v == "unclear" for v in verdicts):
+        return _insufficient(
+            "P2", _P2_TITLE,
+            "None of the provided elements could be matched to a verdict in the "
+            "element-patent analysis. Check that the element descriptions correspond "
+            "to the elements assessed in the research report and that the numbering matches.",
+        )
+
     # ---------------------------------------------------------------------------
     # Faithfulness guard — same post-generation evaluator used by P1.
     # Verifies that the verdict summary is grounded in the analysis text.
@@ -628,13 +747,17 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
             f"{faith.faithfulness_reasoning}".strip(": "),
         )
 
-    # "inferred" is normal for a statistical summary — keep support_level explicit
-    # since per-element excerpt verification already passed above.
+    # Top-level support_level comes from the faithfulness judge — same semantics as P1:
+    #   "explicit"  → verdict summary is directly stated in the analysis text
+    #   "inferred"  → verdict summary is grounded in the analysis but requires
+    #                 connecting separately stated facts (normal for a multi-element summary)
+    # "unsupported" is already handled above (returns insufficient).
+    overall_support: str = faith.faithfulness if faith.faithfulness in {"explicit", "inferred"} else "inferred"
 
     return AssistantResponse(
         pattern_id="P2",
         title=_P2_TITLE,
-        support_level="explicit",
+        support_level=overall_support,
         answer=answer,
         insufficient_message="",
         claim_structure=claim_structure,
