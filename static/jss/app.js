@@ -1001,6 +1001,60 @@ async function generateDraft() {
 function backToEditor() { showPage('page-editor'); }
 
 // ═══════════════════════════════════════════════════════════════
+// Draft Output — manual edit toggle
+// ═══════════════════════════════════════════════════════════════
+let _draftEditing = false;
+
+async function toggleEditDraft() {
+  const out = document.getElementById('composerDraftOutput');
+  const btn = document.getElementById('btnEditDraft');
+  if (!out || !btn) return;
+
+  if (!_draftEditing) {
+    // Enter edit mode — convert rendered HTML to plain text inside a textarea
+    const text = out.innerText || out.textContent || '';
+    out.innerHTML = '<textarea id="draftEditTextarea" style="width:100%;min-height:520px;'
+      + 'background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);'
+      + 'border-radius:6px;padding:12px;font-family:inherit;font-size:14px;line-height:1.5;'
+      + 'resize:vertical;box-sizing:border-box;">' + esc(text) + '</textarea>';
+    btn.innerHTML = '💾 Save';
+    btn.title = 'Kaydet';
+    btn.style.background = 'var(--primary, #3b82f6)';
+    btn.style.color = 'white';
+    _draftEditing = true;
+  } else {
+    // Exit edit mode — render plain text back into the panel, persist to backend
+    const ta = document.getElementById('draftEditTextarea');
+    if (!ta) { _draftEditing = false; return; }
+    const newText = ta.value;
+    // Split on blank-line boundaries → paragraphs; preserve single line breaks via <br>
+    const html = newText
+      .split(/\n\s*\n/)
+      .filter(b => b.trim())
+      .map(blk => '<p style="margin:0 0 10px;">' + esc(blk).replace(/\n/g, '<br>') + '</p>')
+      .join('') || '<p style="color:var(--text-muted)">(empty)</p>';
+    out.innerHTML = html;
+    _composerDraft = html;
+    btn.innerHTML = '✎ Edit';
+    btn.title = 'Manuel düzenle';
+    btn.style.background = 'transparent';
+    btn.style.color = 'var(--text-primary)';
+    _draftEditing = false;
+    if (_patentId) {
+      try {
+        await api('/patents/' + _patentId, {
+          method: 'PATCH',
+          body: JSON.stringify({ patent_draft: html })
+        });
+      } catch (e) {
+        console.error('Draft save failed:', e);
+        alert('Kaydetme başarısız: ' + e.message);
+      }
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════
 // Extract Pipeline
 // ═══════════════════════════════════════════════════════════════
 function openExtractModal() {

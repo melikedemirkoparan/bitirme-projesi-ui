@@ -141,7 +141,15 @@
       </div>
     </div>
     <div class="composer-panel">
-      <div class="composer-tabs"><div class="composer-tab active">Draft Output</div></div>
+      <div class="composer-tabs" style="display:flex;align-items:center;justify-content:space-between;">
+        <div class="composer-tab active">Draft Output</div>
+        <button id="btnEditDraft" type="button" onclick="toggleEditDraft()"
+                title="Manuel düzenle"
+                style="background:transparent;border:1px solid var(--border);color:var(--text-primary);
+                       padding:4px 10px;border-radius:6px;cursor:pointer;font-size:14px;margin-right:8px;">
+          ✎ Edit
+        </button>
+      </div>
       <div class="composer-content" id="composerDraftOutput"><p style="color:var(--text-muted)">Click "Generate Draft"…</p></div>
       <div class="composer-footer">
         <button id="btnGenerateDraft" class="btn btn-primary" onclick="generateDraft()">⚡ Generate Draft</button>
