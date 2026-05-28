@@ -225,7 +225,7 @@ def _run_p1(patent_id: int, idf, rr) -> AssistantResponse:
 #
 # Pipeline:
 #   1. Parse the user-supplied numbered element list (deterministic regex).
-#   2. Send element list + element_patent_analysis to the LLM.
+#   2. Send element list + element_patent_analysis to the LLM in batches of 2.
 #      The prompt validates each element in three sub-steps:
 #        1a. Gibberish check — meaningless names → verdict "unclear".
 #        1b. Name-to-analysis match — element name must share at least one
@@ -242,20 +242,20 @@ def _run_p1(patent_id: int, idf, rr) -> AssistantResponse:
 #   3. Per-element faithfulness guards (no extra LLM calls for excerpt check):
 #        a. Excerpt verification — each support_excerpt is substring-matched
 #           against the analysis; unverified excerpts are dropped.
-#           Zero verified excerpts → support_level "inferred" (not "explicit").
+#           Zero verified excerpts → verdict demoted to "unclear" / caution.
 #        b. PAC grounding check (one faithfulness.check() call per element
-#           that has a Case A pac) — verifies that the patent numbers and
-#           feature descriptions in prior_art_comparison are supported by the
-#           analysis. "unsupported" → pac removed. "inferred" → card
-#           support_level downgraded to "inferred".
-#   4. All-unclear gate — if every element is "unclear", return insufficient.
-#   5. Overall faithfulness guard (one faithfulness.check() call) — verifies
-#      the verdict summary sentence against the analysis.
-#   6. Build claim_structure from the verdicts:
+#           that has a Case A pac) — verifies that patent numbers and feature
+#           descriptions in prior_art_comparison are supported by the analysis.
+#           "unsupported" → pac removed, element demoted to caution.
+#           "inferred"    → card support_level downgraded to "inferred".
+#   4. All-unclear gate — if every effective verdict is "unclear", return insufficient.
+#   5. Build claim_structure from the effective verdicts:
 #        novelty_and_inventive → independent_candidate
 #        novelty_only          → dependent_candidate
 #        no_novelty            → caution (with pac note)
-#        unclear               → caution
+#        unclear / pac_removed → caution
+#   6. Derive overall support_level from candidate elements:
+#        all candidates explicit → "explicit"; any inferred or no candidates → "inferred".
 # ---------------------------------------------------------------------------
 
 _P2_TITLE = "Patentability Assessment"
@@ -497,38 +497,42 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
             "Please use a numbered format: 1. Element name\\n2. Element name …",
         )
 
-    raw, err = _call_model(
-        _P2_SYSTEM,
-        _P2_USER.format(
-            elements=_format_element_list_for_prompt(titles),
-            analysis=analysis_text,
-        ),
-    )
-    if raw is None:
-        return _insufficient("P2", _P2_TITLE, err)
-
-    items = raw.get("elements", [])
-    if not isinstance(items, list) or not items:
-        return _insufficient(
-            "P2", _P2_TITLE,
-            "The local model did not return a per-element assessment. Please try again.",
-        )
+    # Split elements into batches of 2 so each LLM call stays short enough
+    # for the model to reliably reach the final JSON output channel.
+    _BATCH_SIZE = 2
+    batches = [titles[i:i + _BATCH_SIZE] for i in range(0, len(titles), _BATCH_SIZE)]
 
     by_number: dict[int, dict] = {}
-    for item in items:
-        if not isinstance(item, dict):
+    for batch in batches:
+        raw, err = _call_model(
+            _P2_SYSTEM,
+            _P2_USER.format(
+                elements=_format_element_list_for_prompt(batch),
+                analysis=analysis_text,
+            ),
+        )
+        if raw is None:
+            logger.warning("P2 batch %s failed: %s", [e["number"] for e in batch], err)
             continue
-        try:
-            num = int(item.get("number"))
-        except (TypeError, ValueError):
-            continue
-        by_number[num] = item
+        for item in (raw.get("elements") or []):
+            if not isinstance(item, dict):
+                continue
+            try:
+                num = int(item.get("number"))
+            except (TypeError, ValueError):
+                continue
+            by_number[num] = item
+
+    if not by_number:
+        return _insufficient("P2", _P2_TITLE,
+            "The local model did not return a per-element assessment. Please try again.")
 
     independent: list[IndependentCandidate] = []
     dependent: list[DependentCandidate] = []
     cautions: list[str] = []
     evidence_cards: list[EvidenceCard] = []
     verdicts: list[str] = []
+    candidate_support_levels: list[str] = []
 
     normalized_analysis = _normalize_for_match(analysis_text)
     evidence_counter = 0  # global counter for unique evidence IDs across all elements
@@ -570,36 +574,38 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
                 verified_excerpts.append(exc)
 
         # ---------------------------------------------------------------------------
-        # Support level: "explicit" if at least one excerpt verified verbatim;
-        # "inferred" if no excerpt verified but the verdict is still accepted
-        # (model correctly identified the verdict, but transcription was imperfect).
-        # Only "unclear" verdicts from the model itself are dropped to caution.
+        # Excerpt verification → verdict demotion.
+        # A novelty verdict (novelty_and_inventive or novelty_only) with ZERO
+        # verified excerpts is demoted to "unclear" — the model's claim cannot be
+        # traced back to the source, so it must not be reported as a candidate.
+        # "no_novelty" and "unclear" are not promoted/demoted here.
         # ---------------------------------------------------------------------------
         if verified_excerpts:
-            inferred_only = False
             support_level_val = "explicit"
+            inferred_only = False
         else:
+            if verdict != "unclear":
+                cautions.append(
+                    f"Element {num} ({name}): model produced a '{verdict}' verdict, "
+                    "but no verbatim supporting excerpt could be verified in the source — review required."
+                )
+                verdict = "unclear"
+            support_level_val = "insufficient"
             inferred_only = True
-            support_level_val = "inferred"
 
         # ---------------------------------------------------------------------------
-        # PAC grounding check — faithfulness judge evaluates whether the
-        # prior_art_comparison text is actually supported by the analysis.
-        #
-        # Only run when the pac contains a patent/document number (Case A).
-        # Case B pacs ("No specific prior-art document was identified…") are
-        # deterministic paraphrases of the "no relevant document found" phrase
-        # in the analysis; running the faithfulness judge against the full
-        # analysis would produce false positives because it sees patent numbers
-        # from other elements and incorrectly flags the no-doc claim.
+        # PAC grounding check — only runs for Case A pacs (patent number present)
+        # and only when the verdict is still a novelty verdict after excerpt check.
         #
         # "explicit"    → pac content is directly stated — keep as-is.
         # "inferred"    → pac is a reasonable synthesis — keep, note the grounding.
-        # "unsupported" → pac is not grounded in the source — remove it entirely
-        #                 to avoid showing hallucinated patent/feature claims.
+        # "unsupported" → pac removed, element demoted to caution.
         # ---------------------------------------------------------------------------
         pac_grounding_note = ""
-        if prior_art_comparison and _PAC_PATENT_NUM_RE.search(prior_art_comparison):
+        pac_removed = False
+        if verdict in {"novelty_and_inventive", "novelty_only"} \
+                and prior_art_comparison \
+                and _PAC_PATENT_NUM_RE.search(prior_art_comparison):
             pac_faith = faithfulness.check(
                 source=analysis_text,
                 answer=prior_art_comparison,
@@ -611,23 +617,28 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
             if not pac_faith.check_failed:
                 if pac_faith.faithfulness == "unsupported":
                     prior_art_comparison = ""
+                    pac_removed = True
                     pac_grounding_note = (
                         f"Prior-art comparison removed — not supported by source: "
                         f"{pac_faith.faithfulness_reasoning}"
                     )
                 else:
-                    # "explicit" or "inferred": keep the pac, carry the reasoning forward.
                     pac_grounding_note = (
                         f"Prior-art comparison ({pac_faith.faithfulness}): "
                         f"{pac_faith.faithfulness_reasoning}"
                     )
-                    # If the PAC is only inferred (synthesized, not verbatim), downgrade
-                    # the card's support_level too — showing "Explicitly Stated" while the
-                    # prior-art comparison is interpretive would be misleading.
                     if pac_faith.faithfulness == "inferred":
                         support_level_val = "inferred"
 
-        verdicts.append(verdict)
+        # Append the effective verdict for summary counting.
+        # If PAC was removed and the element is demoted to caution, count it as "unclear"
+        # so _verdict_summary reflects what is actually shown to the user.
+        effective_verdict = (
+            "unclear"
+            if pac_removed and verdict in {"novelty_and_inventive", "novelty_only"}
+            else verdict
+        )
+        verdicts.append(effective_verdict)
 
         # Build evidence cards from all verified excerpts for this element.
         element_evidence_ids: list[str] = []
@@ -655,7 +666,13 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
                 if support_note else pac_grounding_note
             )
 
-        if verdict == "novelty_and_inventive":
+        if pac_removed and verdict in {"novelty_and_inventive", "novelty_only"}:
+            cautions.append(
+                f"Element {num} ({name}): prior-art comparison could not be verified "
+                f"and was removed — verdict requires review. {pac_grounding_note}".strip()
+            )
+        elif verdict == "novelty_and_inventive":
+            candidate_support_levels.append(support_level_val)
             independent.append(IndependentCandidate(
                 label=f"Element {num}",
                 features=[name],
@@ -666,6 +683,7 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
                 evidence_ids=element_evidence_ids,
             ))
         elif verdict == "novelty_only":
+            candidate_support_levels.append(support_level_val)
             dependent.append(DependentCandidate(
                 label=f"Element {num}",
                 depends_on="Independent Claim",
@@ -713,46 +731,12 @@ def _run_p2(patent_id: int, rr, elements_text: str | None) -> AssistantResponse:
             "to the elements assessed in the research report and that the numbering matches.",
         )
 
-    # ---------------------------------------------------------------------------
-    # Faithfulness guard — same post-generation evaluator used by P1.
-    # Verifies that the verdict summary is grounded in the analysis text.
-    # P2 already has a per-element excerpt guard above, but this second layer
-    # catches systematic errors where all excerpts verified but the overall
-    # verdict summary contradicts the analysis.
-    #
-    # "inferred" is expected and accepted for P2 — the summary combines
-    # per-element conclusions into one statistical sentence, so it will
-    # rarely be "explicit" by the faithfulness evaluator's definition.
-    # ---------------------------------------------------------------------------
-    faith = faithfulness.check(
-        source=analysis_text,
-        answer=answer,
-        question_context=(
-            "patentability assessment — novelty and inventive step verdicts "
-            "for each numbered invention element"
-        ),
-    )
-
-    if faith.check_failed:
-        return _insufficient(
-            "P2", _P2_TITLE,
-            "The verdict summary could not be verified — the faithfulness evaluator "
-            "failed (model unavailable or did not return valid JSON). Please try again.",
-        )
-
-    if faith.faithfulness == "unsupported":
-        return _insufficient(
-            "P2", _P2_TITLE,
-            f"The verdict summary is not supported by the element-patent analysis: "
-            f"{faith.faithfulness_reasoning}".strip(": "),
-        )
-
-    # Top-level support_level comes from the faithfulness judge — same semantics as P1:
-    #   "explicit"  → verdict summary is directly stated in the analysis text
-    #   "inferred"  → verdict summary is grounded in the analysis but requires
-    #                 connecting separately stated facts (normal for a multi-element summary)
-    # "unsupported" is already handled above (returns insufficient).
-    overall_support: str = faith.faithfulness if faith.faithfulness in {"explicit", "inferred"} else "inferred"
+    # Derive overall support from candidate elements only.
+    # "explicit" only if every candidate has explicit excerpts; any "inferred" pulls it down.
+    if candidate_support_levels and all(s == "explicit" for s in candidate_support_levels):
+        overall_support = "explicit"
+    else:
+        overall_support = "inferred"
 
     return AssistantResponse(
         pattern_id="P2",
@@ -868,7 +852,7 @@ def _run_p3(patent_id: int, rr, term: str | None) -> AssistantResponse:
 # ---------------------------------------------------------------------------
 
 def _split_paragraphs(text: str) -> list[str]:
-    """Split by blank lines; fall back to ~400-char windows if blocks are huge."""
+    """Split by blank lines; chunk large blocks by sentence boundary at ~1200 chars."""
     raw_blocks = re.split(r"\n{2,}", text.strip())
     result = []
     for block in raw_blocks:
@@ -1060,6 +1044,7 @@ def _call_model(system_prompt: str, user_prompt: str) -> tuple[dict | None, str]
             system_prompt=system_prompt,
             temperature=0.15,
         )
+        logger.debug("_call_model raw result keys: %s", list(result.keys()) if result else None)
         return result, ""
     except LLMConnectionError as exc:
         logger.warning("Assistant LLM connection error: %s", exc)

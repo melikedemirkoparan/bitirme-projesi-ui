@@ -153,7 +153,7 @@ def generate(
     content = _extract_content(data, protocol)
     if not content:
         raise LLMResponseError(f"LLM backend returned empty content via {protocol} protocol.")
-    return content
+    return _strip_model_preamble(content)
 
 
 def generate_json(
@@ -184,6 +184,8 @@ def generate_json(
 
     def _build_payload(sp: str, up: str) -> dict:
         if protocol == "openai":
+            # No response_format constraint — let the model output freely;
+            # _parse_json handles the extraction with channel-token stripping.
             return {
                 "model": effective_model,
                 "messages": [
@@ -192,7 +194,6 @@ def generate_json(
                 ],
                 "stream": False,
                 "temperature": temperature,
-                "response_format": {"type": "json_object"},
             }
         return {
             "model": effective_model,
@@ -220,6 +221,7 @@ def generate_json(
 
     # First attempt
     raw = _call(system_prompt, user_prompt)
+    logger.debug("generate_json raw (first 500): %s", raw[:500])
     try:
         return _parse_json(raw)
     except LLMParseError:
@@ -270,29 +272,50 @@ def _extract_content(data: dict, protocol: str) -> str:
     return (data.get("message") or {}).get("content", "") or ""
 
 
+def _strip_model_preamble(raw: str) -> str:
+    """Strip reasoning/channel preambles emitted by various model families.
+
+    Handles:
+    - DeepSeek-R1: <think>...</think> blocks (with or without closing tag).
+    - openai_gpt-oss-20b / llama-cpp channel format:
+        <|channel|>analysis<|message|>...reasoning...<|channel|>final<|message|>ACTUAL
+      If a "final" channel is present, everything before it is dropped.
+      Otherwise all <|...|> tokens are stripped in place.
+    """
+    text = raw
+
+    # --- DeepSeek-R1 <think> blocks ---
+    text = re.sub(r"<think\b[^>]*>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    if "<think" in text and "</think>" not in text:
+        first_brace = text.find("{")
+        if first_brace > 0:
+            text = text[first_brace:]
+
+    # --- llama-cpp channel tokens (openai_gpt-oss-20b and similar) ---
+    # If a "final" output channel exists, take only what comes after it.
+    final_marker = "<|channel|>final<|message|>"
+    if final_marker in text:
+        text = text.split(final_marker, 1)[1]
+    elif "<|channel|>" in text:
+        # No "final" channel — strip all <|...|> special tokens in place.
+        text = re.sub(r"<\|[^|>]*\|>", "", text)
+
+    return text.strip()
+
+
 def _parse_json(raw: str) -> dict:
     """Parse a raw string as JSON, tolerating common LLM output variants.
 
     Layered strategy, each step a strict superset of the previous:
 
-    0. Strip <think>...</think> blocks (DeepSeek-R1 reasoning preamble).
+    0. Strip model preambles (DeepSeek-R1 <think>, llama-cpp channel tokens).
     1. Try parsing as-is.
     2. Strip markdown code fences (``` or ```json … ```).
     3. Extract the first balanced top-level JSON object from the text.
 
     Raises LLMParseError if every strategy fails.
     """
-    # Strategy 0: drop any <think>...</think> reasoning blocks emitted by
-    # DeepSeek-R1 and similar reasoning models. The blocks may appear before
-    # or interleaved with the JSON; remove them all (DOTALL for multiline).
-    text = re.sub(r"<think\b[^>]*>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE)
-    # Some R1 variants emit only the opening tag and no closing tag — drop the
-    # leading "<think>...\n\n" preamble up to the first { we see.
-    if "<think" in text and "</think>" not in text:
-        first_brace = text.find("{")
-        if first_brace > 0:
-            text = text[first_brace:]
-    text = text.strip()
+    text = _strip_model_preamble(raw)
 
     try:
         result = json.loads(text)
