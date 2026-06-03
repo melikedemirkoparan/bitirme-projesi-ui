@@ -7,12 +7,15 @@ echo "Waiting for PostgreSQL..."
 # Wait for DB to be ready
 for i in $(seq 1 30); do
   python -c "
-import psycopg
+import os, psycopg
+# DATABASE_URL is a SQLAlchemy URL (postgresql+psycopg://); strip the driver
+# part so libpq/psycopg.connect can parse it.
+dsn = os.environ['DATABASE_URL'].replace('postgresql+psycopg://', 'postgresql://')
 try:
-    conn = psycopg.connect('$DATABASE_URL', connect_timeout=3)
+    conn = psycopg.connect(dsn, connect_timeout=3)
     conn.close()
     exit(0)
-except:
+except Exception:
     exit(1)
 " && break
   echo "  DB not ready, retrying ($i/30)..."
