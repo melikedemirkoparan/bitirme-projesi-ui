@@ -5,7 +5,11 @@ Patent taslaklarının yapılandırılmış biçimde hazırlanması için geliş
 katmanı yerel veya uzaktan bir **LLM** (Ollama / OpenAI-uyumlu) ile çalışır. Tümü
 **Docker** ile ayağa kalkar.
 
-## Hızlı Başlangıç (sıfırdan, veriyle birlikte)
+> **Bu branch (`clean-start-no-seed`):** Uygulama **boş veritabanıyla** açılır —
+> hazır demo patenti gelmez. Kullanıcı **+ New Project** ile sıfırdan başlar.
+> Demo verisini yine de yüklemek isterseniz `seed/README.md` adımlarını izleyin.
+
+## Hızlı Başlangıç (sıfırdan, boş veritabanı)
 
 ### Gereksinimler
 - **Docker Desktop** (Compose dahil)
@@ -23,9 +27,9 @@ docker compose up --build
 ```
 
 Bu kadar. Açılışta:
-- PostgreSQL ayağa kalkar ve **`seed/patent_db_seed.sql`** otomatik yüklenir →
-  **5 patent + araştırma raporları + elementler hazır gelir** (bkz. `seed/README.md`).
-- App migration'ları çalıştırır (seed zaten güncel şemada olduğu için no-op) ve sunucuyu başlatır.
+- PostgreSQL ayağa kalkar (seed **otomatik yüklenmez** — bu branch'te kapalı).
+- App migration'ları çalıştırarak şemayı oluşturur ve sunucuyu başlatır.
+- Veritabanı **boştur**; arayüzde proje listesi boş gelir. **+ New Project** ile başlayın.
 
 Uygulama: **http://localhost:8000**
 
@@ -58,8 +62,8 @@ curl -X POST http://localhost:8000/api/rag/set-llm-url \
 
 ## Veritabanı
 
-Demo verisi `seed/` klasöründe versiyonlanır ve ilk açılışta otomatik yüklenir.
-Ayrıntılar, sıfırlama ve yeni dump alma adımları için: **[`seed/README.md`](seed/README.md)**.
+Demo verisi `seed/` klasöründe versiyonlanır ancak bu branch'te **otomatik yüklenmez**.
+Elle yüklemek, sıfırlamak veya yeni dump almak için: **[`seed/README.md`](seed/README.md)**.
 
 Erişim (demo): kullanıcı `patent_user` / şifre `patent_pass_password123` / db `patent_db`.
 

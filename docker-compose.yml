@@ -10,10 +10,10 @@ services:
       - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
-      # Seed data — loaded automatically by the postgres image ONLY on a fresh
-      # (empty) pgdata volume. A clean clone therefore starts with the demo
-      # patents/research reports already in place. See seed/README.md.
-      - ./seed/patent_db_seed.sql:/docker-entrypoint-initdb.d/01_seed.sql:ro
+      # NOTE: Seed auto-load is intentionally DISABLED on this branch. The app
+      # starts with an EMPTY database — no demo patents. Users create their own
+      # projects via "+ New Project". To load the demo data manually, see
+      # seed/README.md (the SQL file is still in the repo for that purpose).
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U patent_user -d patent_db"]
       interval: 5s
