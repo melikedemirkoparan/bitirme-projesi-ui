@@ -34,6 +34,10 @@ services:
       - "host.docker.internal:host-gateway"
     volumes:
       - appdata:/app/data
+      # Persist the ChromaDB vector store (RAG embeddings) so they survive
+      # container rebuilds/recreations. Without this, /app/storage lives in
+      # the container layer and is lost on every recreate, forcing a re-upload.
+      - chromadata:/app/storage
     depends_on:
       db:
         condition: service_healthy
@@ -41,3 +45,4 @@ services:
 volumes:
   pgdata:
   appdata:
+  chromadata:
